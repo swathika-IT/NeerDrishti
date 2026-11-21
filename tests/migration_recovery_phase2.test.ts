@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { isCompleted, isStaleLock, InMemoryMigrationStateStore } from '../scripts/migration/recovery.ts';
+import { isCompleted, isStaleLock, InMemoryMigrationStateStore } from '../scripts/migration/recovery.js';
 
 test('checkpoint completed detection', () => {
   assert.equal(isCompleted({ status: 'completed', sourceCount: 5 }, 5), true);
