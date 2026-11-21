@@ -25,7 +25,7 @@ jobs:
           MIGRATION_TEST_MONGODB_URI: ${{ env.MIGRATION_TEST_MONGODB_URI }}
         run: |
           node <<'NODE'
-          const { MongoClient } = require(process.cwd() + '/node_modules/mongodb');
+          const net = require('net');
           const uri = process.env.MIGRATION_TEST_MONGODB_URI || '';
           if (!uri || !uri.startsWith('mongodb://')) {
             console.error('MIGRATION_TEST_MONGODB_URI must be a local mongodb:// URI');
@@ -40,19 +40,22 @@ jobs:
             console.error('Only localhost/127.0.0.1 MongoDB URIs are allowed');
             process.exit(1);
           }
-          const client = new MongoClient(uri, { serverSelectionTimeoutMS: 2000, connectTimeoutMS: 2000 });
+          const port = Number(parsed.port || 27017);
           (async () => {
             for (let i = 0; i < 30; i++) {
-              try {
-                await client.connect();
-                await client.db('admin').command({ ping: 1 });
-                console.log('MongoDB ready');
-                await client.close();
+              const ok = await new Promise(resolve => {
+                const socket = net.createConnection({ host: parsed.hostname, port }, () => {
+                  socket.end();
+                  resolve(true);
+                });
+                socket.on('error', () => resolve(false));
+                socket.setTimeout(2000, () => { socket.destroy(); resolve(false); });
+              });
+              if (ok) {
+                console.log('MongoDB port ready');
                 process.exit(0);
-              } catch (err) {
-                await client.close().catch(() => {});
-                await new Promise(resolve => setTimeout(resolve, 2000));
               }
+              await new Promise(resolve => setTimeout(resolve, 2000));
             }
             console.error('MongoDB did not become ready');
             process.exit(1);
