@@ -19,6 +19,8 @@ services:
         value: "22"                    # node:sqlite needs Node >= 22.5
       - key: NODE_ENV
         value: production
+      - key: COOKIE_SECURE
+        value: "true"
       - key: DATABASE_PATH
         value: /var/data/neerdrishti.db
       - key: NEERDRISHTI_BACKUP_DIR
@@ -36,6 +38,14 @@ services:
       - key: NOTIFICATION_LIVE_SEND_ENABLED
         value: "false"
       - key: MAIL_DRY_RUN
+        value: "true"
+      - key: SMS_ENABLED
+        value: "false"
+      - key: WHATSAPP_ENABLED
+        value: "false"
+      - key: SECURITY_CSP_ENABLED
+        value: "true"
+      - key: REQUEST_LOG_ENABLED
         value: "true"
       # Basemap: leave unset for the local fallback. Set to an authorised tile URL (with your key) to enable tiles.
       - key: MAP_TILE_URL
