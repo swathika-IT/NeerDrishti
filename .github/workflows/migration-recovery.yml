@@ -25,7 +25,7 @@ jobs:
           MIGRATION_TEST_MONGODB_URI: ${{ env.MIGRATION_TEST_MONGODB_URI }}
         run: |
           node <<'NODE'
-          const { MongoClient } = require('mongodb');
+          const { MongoClient } = require(process.cwd() + '/node_modules/mongodb');
           const uri = process.env.MIGRATION_TEST_MONGODB_URI || '';
           if (!uri || !uri.startsWith('mongodb://')) {
             console.error('MIGRATION_TEST_MONGODB_URI must be a local mongodb:// URI');
