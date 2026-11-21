@@ -23,7 +23,7 @@ htmlcov/
 *.sqlite3
 *.sqlite3-journal
 backups/
-reports/
+/reports/
 data/imports/
 
 # Node ignores
@@ -56,7 +56,7 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
-data/quality_reports/*.json
+data/quality_/reports/*.json
 .cache/
 *.tif
 *.part
