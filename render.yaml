@@ -1,0 +1,54 @@
+# Render Blueprint for NeerDrishti.
+# NOTE: persistent disks require a paid instance type (starter or above).
+# On the free plan the SQLite file is ephemeral and resets on every deploy/restart.
+services:
+  - type: web
+    name: neerdrishti
+    runtime: node
+    plan: starter
+    branch: main
+    buildCommand: npm ci && npm run build
+    startCommand: npm start            # bootstraps schema + migrations, then starts the server
+    healthCheckPath: /api/health/ready
+    disk:
+      name: neerdrishti-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "22"                    # node:sqlite needs Node >= 22.5
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_PATH
+        value: /var/data/neerdrishti.db
+      - key: NEERDRISHTI_BACKUP_DIR
+        value: /var/data/backups
+      - key: DB_ALLOW_MEMORY_FALLBACK
+        value: "false"
+      - key: APP_BASE_URL
+        sync: false                    # e.g. https://neerdrishti.onrender.com
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: AUTH_DEV_EXPOSE_TOKENS
+        value: "false"
+      - key: NOTIFICATION_DRY_RUN
+        value: "true"                  # keep true until live sending is explicitly approved
+      - key: NOTIFICATION_LIVE_SEND_ENABLED
+        value: "false"
+      - key: MAIL_DRY_RUN
+        value: "true"
+      # Basemap: leave unset for the local fallback. Set to an authorised tile URL (with your key) to enable tiles.
+      - key: MAP_TILE_URL
+        sync: false
+      - key: MAP_TILE_ATTRIBUTION
+        sync: false
+      # Hosted LLM is optional. Without it the assistant uses deterministic fallbacks.
+      # localhost Ollama is NOT reachable from Render.
+      - key: LLM_PROVIDER
+        value: llama
+      - key: OPENAI_COMPATIBLE_BASE_URL
+        sync: false                    # e.g. https://api.groq.com/openai/v1
+      - key: OPENAI_COMPATIBLE_API_KEY
+        sync: false
+      - key: OPENAI_COMPATIBLE_MODEL
+        sync: false                    # e.g. llama-3.1-8b-instant

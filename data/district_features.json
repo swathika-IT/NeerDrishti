@@ -1,0 +1,634 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-20T01:31:15.745Z",
+  "notes": "Static risk-factor inputs with per-value provenance. EXPERT_PRIOR/PROXY_DERIVED values are prototype estimates, not measurements.",
+  "districts": {
+    "hyderabad": {
+      "district_id": "hyderabad",
+      "district_name": "Hyderabad",
+      "flood_history": {
+        "score": 88,
+        "provenance": "EXPERT_PRIOR",
+        "source": "NeerDrishti prototype expert prior (no dataset)"
+      },
+      "terrain": {
+        "score": 75,
+        "provenance": "EXPERT_PRIOR",
+        "source": "NeerDrishti prototype expert prior (no dataset)"
+      },
+      "drainage": {
+        "score": 92,
+        "provenance": "EXPERT_PRIOR",
+        "source": "NeerDrishti prototype expert prior (no dataset)"
+      }
+    },
+    "warangal": {
+      "district_id": "warangal",
+      "district_name": "Warangal",
+      "flood_history": {
+        "score": 80,
+        "provenance": "EXPERT_PRIOR",
+        "source": "NeerDrishti prototype expert prior (no dataset)"
+      },
+      "terrain": {
+        "score": 70,
+        "provenance": "EXPERT_PRIOR",
+        "source": "NeerDrishti prototype expert prior (no dataset)"
+      },
+      "drainage": {
+        "score": 78,
+        "provenance": "EXPERT_PRIOR",
+        "source": "NeerDrishti prototype expert prior (no dataset)"
+      }
+    },
+    "nirmal": {
+      "district_id": "nirmal",
+      "district_name": "Nirmal",
+      "flood_history": {
+        "score": 85,
+        "provenance": "EXPERT_PRIOR",
+        "source": "NeerDrishti prototype expert prior (no dataset)"
+      },
+      "terrain": {
+        "score": 82,
+        "provenance": "EXPERT_PRIOR",
+        "source": "NeerDrishti prototype expert prior (no dataset)"
+      },
+      "drainage": {
+        "score": 65,
+        "provenance": "EXPERT_PRIOR",
+        "source": "NeerDrishti prototype expert prior (no dataset)"
+      }
+    },
+    "mancherial": {
+      "district_id": "mancherial",
+      "district_name": "Mancherial",
+      "flood_history": {
+        "score": 78,
+        "provenance": "EXPERT_PRIOR",
+        "source": "NeerDrishti prototype expert prior (no dataset)"
+      },
+      "terrain": {
+        "score": 80,
+        "provenance": "EXPERT_PRIOR",
+        "source": "NeerDrishti prototype expert prior (no dataset)"
+      },
+      "drainage": {
+        "score": 70,
+        "provenance": "EXPERT_PRIOR",
+        "source": "NeerDrishti prototype expert prior (no dataset)"
+      }
+    },
+    "bhadradri_kothagudem": {
+      "district_id": "bhadradri_kothagudem",
+      "district_name": "Bhadradri Kothagudem",
+      "flood_history": {
+        "score": 92,
+        "provenance": "EXPERT_PRIOR",
+        "source": "NeerDrishti prototype expert prior (no dataset)"
+      },
+      "terrain": {
+        "score": 88,
+        "provenance": "EXPERT_PRIOR",
+        "source": "NeerDrishti prototype expert prior (no dataset)"
+      },
+      "drainage": {
+        "score": 74,
+        "provenance": "EXPERT_PRIOR",
+        "source": "NeerDrishti prototype expert prior (no dataset)"
+      }
+    },
+    "adilabad": {
+      "district_id": "adilabad",
+      "district_name": "Adilabad",
+      "flood_history": {
+        "score": 59,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 56,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 53,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "hanumakonda": {
+      "district_id": "hanumakonda",
+      "district_name": "Hanumakonda",
+      "flood_history": {
+        "score": 55,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 52,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 49,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "jagtial": {
+      "district_id": "jagtial",
+      "district_name": "Jagtial",
+      "flood_history": {
+        "score": 61,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 58,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 54,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "jangaon": {
+      "district_id": "jangaon",
+      "district_name": "Jangaon",
+      "flood_history": {
+        "score": 43,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 41,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 38,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "jayashankar_bhupalpally": {
+      "district_id": "jayashankar_bhupalpally",
+      "district_name": "Jayashankar Bhupalpally",
+      "flood_history": {
+        "score": 65,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 61,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 58,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "jogulamba_gadwal": {
+      "district_id": "jogulamba_gadwal",
+      "district_name": "Jogulamba Gadwal",
+      "flood_history": {
+        "score": 57,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 54,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 51,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "kamareddy": {
+      "district_id": "kamareddy",
+      "district_name": "Kamareddy",
+      "flood_history": {
+        "score": 46,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 43,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 41,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "karimnagar": {
+      "district_id": "karimnagar",
+      "district_name": "Karimnagar",
+      "flood_history": {
+        "score": 62,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 59,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 55,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "khammam": {
+      "district_id": "khammam",
+      "district_name": "Khammam",
+      "flood_history": {
+        "score": 68,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 65,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 61,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "kumuram_bheem_asifabad": {
+      "district_id": "kumuram_bheem_asifabad",
+      "district_name": "Kumuram Bheem Asifabad",
+      "flood_history": {
+        "score": 52,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 50,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 47,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "mahabubabad": {
+      "district_id": "mahabubabad",
+      "district_name": "Mahabubabad",
+      "flood_history": {
+        "score": 49,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 47,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 44,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "mahabubnagar": {
+      "district_id": "mahabubnagar",
+      "district_name": "Mahabubnagar",
+      "flood_history": {
+        "score": 53,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 50,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 48,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "medak": {
+      "district_id": "medak",
+      "district_name": "Medak",
+      "flood_history": {
+        "score": 57,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 54,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 51,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "medchal_malkajgiri": {
+      "district_id": "medchal_malkajgiri",
+      "district_name": "Medchal-Malkajgiri",
+      "flood_history": {
+        "score": 67,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 63,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 60,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "mulugu": {
+      "district_id": "mulugu",
+      "district_name": "Mulugu",
+      "flood_history": {
+        "score": 63,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 59,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 56,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "nagarkurnool": {
+      "district_id": "nagarkurnool",
+      "district_name": "Nagarkurnool",
+      "flood_history": {
+        "score": 48,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 45,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 43,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "nalgonda": {
+      "district_id": "nalgonda",
+      "district_name": "Nalgonda",
+      "flood_history": {
+        "score": 55,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 52,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 49,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "narayanpet": {
+      "district_id": "narayanpet",
+      "district_name": "Narayanpet",
+      "flood_history": {
+        "score": 40,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 38,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 36,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "nizamabad": {
+      "district_id": "nizamabad",
+      "district_name": "Nizamabad",
+      "flood_history": {
+        "score": 64,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 60,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 57,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "peddapalli": {
+      "district_id": "peddapalli",
+      "district_name": "Peddapalli",
+      "flood_history": {
+        "score": 55,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 52,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 49,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "rajanna_sircilla": {
+      "district_id": "rajanna_sircilla",
+      "district_name": "Rajanna Sircilla",
+      "flood_history": {
+        "score": 67,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 64,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 60,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "ranga_reddy": {
+      "district_id": "ranga_reddy",
+      "district_name": "Ranga Reddy",
+      "flood_history": {
+        "score": 65,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 61,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 58,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "sangareddy": {
+      "district_id": "sangareddy",
+      "district_name": "Sangareddy",
+      "flood_history": {
+        "score": 60,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 57,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 54,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "siddipet": {
+      "district_id": "siddipet",
+      "district_name": "Siddipet",
+      "flood_history": {
+        "score": 54,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 51,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 48,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "suryapet": {
+      "district_id": "suryapet",
+      "district_name": "Suryapet",
+      "flood_history": {
+        "score": 47,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 44,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 42,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "vikarabad": {
+      "district_id": "vikarabad",
+      "district_name": "Vikarabad",
+      "flood_history": {
+        "score": 44,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 41,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 39,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "wanaparthy": {
+      "district_id": "wanaparthy",
+      "district_name": "Wanaparthy",
+      "flood_history": {
+        "score": 42,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 40,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 37,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    },
+    "yadadri_bhuvanagiri": {
+      "district_id": "yadadri_bhuvanagiri",
+      "district_name": "Yadadri Bhuvanagiri",
+      "flood_history": {
+        "score": 48,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "terrain": {
+        "score": 46,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      },
+      "drainage": {
+        "score": 43,
+        "provenance": "PROXY_DERIVED",
+        "source": "Derived from prototype_vulnerability_score (single proxy)"
+      }
+    }
+  }
+}

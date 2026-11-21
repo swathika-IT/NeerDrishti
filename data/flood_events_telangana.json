@@ -1,0 +1,18 @@
+{
+  "dataset_provenance": {
+    "created_by": "PENDING CURATION — no events added yet",
+    "created_on": "2026-11-04",
+    "updated_at": "2026-11-04",
+    "method": "hand-curated from institutional sources (IMD bulletins, Telangana SDMA reports, local authority releases). Empty until a curator adds verified events.",
+    "sources": [
+      {
+        "title": "EXAMPLE TEMPLATE ONLY — replace with real source used",
+        "publisher": "PENDING",
+        "url": "https://example.invalid",
+        "accessed_on": "2026-11-04",
+        "licence": "unknown — do not redistribute until confirmed"
+      }
+    ]
+  },
+  "events": []
+}

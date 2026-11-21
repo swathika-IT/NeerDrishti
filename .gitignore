@@ -1,0 +1,62 @@
+# Python ignores
+__pycache__/
+*.py[cod]
+*$py.class
+.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.db.bak
+*.db.backup
+*.sqlite
+*.sqlite3
+*.sqlite3-journal
+backups/
+reports/
+data/imports/
+
+# Node ignores
+node_modules/
+build/
+dist/
+coverage/
+*.log
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Deployment / local tooling state
+.vercel/
+.netlify/
+tmp/
+temp/
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Data pipeline: large/downloaded/generated artefacts stay out of Git (see DATA_INGESTION_GUIDE.md)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/quality_reports/*.json
+.cache/
+*.tif
+*.part
