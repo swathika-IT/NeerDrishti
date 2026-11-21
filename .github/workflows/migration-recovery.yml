@@ -1,0 +1,36 @@
+name: Migration Recovery Integration
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  migration-recovery:
+    runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      MIGRATION_TEST_MONGODB_URI: mongodb://127.0.0.1:27017/neerdrishti_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Wait for MongoDB
+        run: |
+          for i in $(seq 1 30); do
+            if mongosh "$MIGRATION_TEST_MONGODB_URI" --quiet --eval 'db.runCommand({ ping: 1 })' >/tmp/mongo-ping.txt 2>&1; then
+              cat /tmp/mongo-ping.txt
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/mongo-ping.txt || true
+          exit 1
+      - run: npx tsx --test tests/migration_recovery.test.ts tests/migration_recovery_phase2.test.ts tests/migration_recovery_integration.test.ts
+      - run: npm run lint
+      - run: npm run build
