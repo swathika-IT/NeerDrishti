@@ -49,9 +49,9 @@ jobs:
             console.error('MongoDB not ready'); process.exit(1);
           })();
           NODE
+      - run: npm run build
       - name: Integration tests
         env:
           MONGODB_TEST_URI: ${{ env.MONGODB_TEST_URI }}
         run: npx tsx --test tests/auth_security.test.ts tests/report_security.test.ts tests/cap_feed.test.ts tests/notification_dry_run.test.ts tests/open_meteo.test.ts tests/historical_import.test.ts tests/pipeline_contract.test.ts
       - run: npm run lint
-      - run: npm run build
