@@ -3040,7 +3040,9 @@ async function startServer() {
 }
 
 const modulePath = typeof import.meta.url === 'string' ? fileURLToPath(import.meta.url) : undefined;
-const isMainModule = process.argv[1] && modulePath ? path.resolve(process.argv[1]) === path.resolve(modulePath) : false;
+const isMainModule = typeof require !== 'undefined' && typeof module !== 'undefined'
+  ? require.main === module
+  : Boolean(process.argv[1] && modulePath && path.resolve(process.argv[1]) === path.resolve(modulePath));
 if (isMainModule) {
   startServer();
 }
