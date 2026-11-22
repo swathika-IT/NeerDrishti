@@ -1,9 +1,10 @@
-import { MongoClient } from 'mongodb';
+import { MongoClient, type Db } from 'mongodb';
 
 export interface MongoTestContext {
   uri: string;
   dbName: string;
   client: MongoClient;
+  db: Db;
 }
 
 const TEST_DB_PREFIX = 'neerdrishti_ci_test';
@@ -41,7 +42,8 @@ export async function connectMongoTest(uri = getMongoTestUri()): Promise<MongoTe
   assertSafeTestDbName(dbName);
   const client = new MongoClient(uri, { serverSelectionTimeoutMS: 5000 });
   await client.connect();
-  return { uri, dbName, client };
+  const db = client.db(dbName);
+  return { uri, dbName, client, db };
 }
 
 export async function resetMongoTestDb(ctx: MongoTestContext): Promise<void> {

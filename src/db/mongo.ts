@@ -417,7 +417,8 @@ export async function getUserPendingRoleRequest(userId: number): Promise<any> {
 
 export async function listRoleRequests(status?: string): Promise<any[]> {
   const filter = status ? { status } : {};
-  return await C('role_requests').find(filter).sort({ created_at: -1 }).toArray();
+  const rows = await C('role_requests').find(filter).sort({ created_at: -1, _id: -1 }).toArray();
+  return rows.map((r: any) => ({ ...r, id: r.id ?? r._id }));
 }
 
 export async function approveRoleRequest(requestId: number, adminUserId: number, jurisdictions: string[]): Promise<{ success: boolean; error?: string }> {
