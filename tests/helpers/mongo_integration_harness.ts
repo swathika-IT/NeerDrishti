@@ -84,10 +84,10 @@ export async function spawnTestServer(opts: { port: number; mongoUri: string; ex
     stdio: ['ignore', 'pipe', 'pipe'],
   }) as ChildProcessWithoutNullStreams;
   let log = '';
-  server.stdout.on('data', c => { log += c.toString(); });
-  server.stderr.on('data', c => { log += c.toString(); });
+  server.stdout.on('data', c => { log += c.toString(); if (log.length > 20000) log = log.slice(-20000); });
+  server.stderr.on('data', c => { log += c.toString(); if (log.length > 20000) log = log.slice(-20000); });
   const base = `http://127.0.0.1:${opts.port}`;
-  const deadline = Date.now() + 60000;
+  const deadline = Date.now() + 45000;
   while (Date.now() < deadline) {
     if (server.exitCode !== null) throw new Error(`Server exited ${server.exitCode}\n${log}`);
     try {
@@ -104,7 +104,12 @@ export async function stopTestServer(server: ChildProcessWithoutNullStreams | nu
   if (!server) return;
   if (server.exitCode === null) {
     server.kill('SIGTERM');
-    await new Promise(r => setTimeout(r, 500));
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline && server.exitCode === null) {
+      await new Promise(r => setTimeout(r, 200));
+    }
     if (server.exitCode === null) server.kill('SIGKILL');
   }
+  server.stdout?.removeAllListeners();
+  server.stderr?.removeAllListeners();
 }

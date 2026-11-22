@@ -2981,18 +2981,20 @@ async function startServer() {
   const httpServer = app.listen(PORT, '0.0.0.0', () => {
     console.log(`NeerDrishti Phase C Server listening on port ${PORT}`);
     // Start lightweight Open-Meteo live rainfall telemetry scheduled refresh
-    try {
-      const districts = loadDistrictMetadata();
-      if (districts && districts.length > 0) {
-        openMeteoService.startScheduledRefresh(districts);
+    if (process.env.NODE_ENV !== 'test' && process.env.NEERDRISHTI_DISABLE_SCHEDULED_REFRESH !== 'true') {
+      try {
+        const districts = loadDistrictMetadata();
+        if (districts && districts.length > 0) {
+          openMeteoService.startScheduledRefresh(districts);
+        }
+      } catch (err) {
+        console.error('Failed to initialize Open-Meteo live refresh on server start:', err);
       }
-    } catch (err) {
-      console.error('Failed to initialize Open-Meteo live refresh on server start:', err);
-    }
-    try {
-      imdCapService.startScheduledRefresh();
-    } catch (err) {
-      console.error('Failed to initialize official CAP refresh on server start:', err);
+      try {
+        imdCapService.startScheduledRefresh();
+      } catch (err) {
+        console.error('Failed to initialize official CAP refresh on server start:', err);
+      }
     }
   });
 
