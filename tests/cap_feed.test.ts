@@ -246,7 +246,7 @@ test('refresh ingests IMD and SACHET alerts, maps districts, and prefilters all-
   assert.ok(!rows.some(row => row.district_id === 'STATE_TELANGANA'));
   assert.ok(!fetchCalls.includes(apLink), 'all-India non-Telangana CAP documents must not be fetched');
 
-  const active = imdCapService.getStoredAlerts(50, true, true);
+  const active = await imdCapService.getStoredAlerts(50, true, true);
   assert.equal(active.length, 3);
   assert.ok(active.every((alert: any) => alert.lifecycle === 'ACTIVE'));
   assert.ok(active.some((alert: any) => alert.feedKey === 'IMD'));
@@ -297,7 +297,7 @@ test('newer Update supersedes the same identifier and district', async () => {
   const result = await imdCapService.refresh();
   assert.equal(result.stored, 1);
 
-  const active = imdCapService.getStoredAlerts(50, true, true).filter((alert: any) => alert.identifier === 'sach-update-1');
+  const active = (await imdCapService.getStoredAlerts(50, true, true)).filter((alert: any) => alert.identifier === 'sach-update-1');
   assert.equal(active.length, 1);
   assert.equal(active[0].msgType, 'Update');
   assert.equal(active[0].severity, 'Severe');
@@ -320,12 +320,12 @@ test('Cancel is stored and excluded from active alerts', async () => {
   const result = await imdCapService.refresh();
   assert.equal(result.stored, 1);
 
-  const active = imdCapService.getStoredAlerts(50, true, true).filter((alert: any) => alert.identifier === 'sach-update-1');
+  const active = (await imdCapService.getStoredAlerts(50, true, true)).filter((alert: any) => alert.identifier === 'sach-update-1');
   assert.equal(active.length, 0);
-  const all = imdCapService.getStoredAlerts(50, true, false).filter((alert: any) => alert.identifier === 'sach-update-1');
+  const all = (await imdCapService.getStoredAlerts(50, true, false)).filter((alert: any) => alert.identifier === 'sach-update-1');
   assert.equal(all.length, 1);
   assert.equal(all[0].lifecycle, 'CANCELLED');
-  assert.equal(imdCapService.getAlertSummary().cancelled_count, 1);
+  assert.equal((await imdCapService.getAlertSummary()).cancelled_count, 1);
 });
 
 test('expired warnings are stored but excluded from active alerts', async () => {
@@ -343,8 +343,8 @@ test('expired warnings are stored but excluded from active alerts', async () => 
   };
   const result = await imdCapService.refresh();
   assert.equal(result.stored, 1);
-  assert.equal(imdCapService.getStoredAlerts(50, true, true).length, 0);
-  const all = imdCapService.getStoredAlerts(50, true, false);
+  assert.equal((await imdCapService.getStoredAlerts(50, true, true)).length, 0);
+  const all = await imdCapService.getStoredAlerts(50, true, false);
   assert.equal(all.length, 1);
   assert.equal(all[0].lifecycle, 'EXPIRED');
 });
@@ -377,7 +377,7 @@ test('empty feeds are reported STALE, never HEALTHY', async () => {
   assert.equal(result.status, 'STALE');
   const stateFeed = imdCapService.getStatus().feeds.find((feed: any) => feed.key === 'SACHET_STATE');
   assert.equal(stateFeed.health, 'STALE');
-  const active = imdCapService.getStoredAlerts(50, true, true);
+  const active = await imdCapService.getStoredAlerts(50, true, true);
   assert.equal(active.length, 0);
 });
 

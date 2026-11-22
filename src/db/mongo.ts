@@ -417,8 +417,15 @@ export async function getUserPendingRoleRequest(userId: number): Promise<any> {
 
 export async function listRoleRequests(status?: string): Promise<any[]> {
   const filter = status ? { status } : {};
-  const rows = await C('role_requests').find(filter).sort({ created_at: -1, _id: -1 }).toArray();
-  return rows.map((r: any) => ({ ...r, id: r.id ?? r._id }));
+  const rows = await C('role_requests').aggregate([
+    { $match: filter },
+    { $sort: { created_at: -1, _id: -1 } },
+    { $lookup: { from: 'users', localField: 'user_id', foreignField: '_id', as: 'user' } },
+    { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+    { $addFields: { id: { $ifNull: ['$id', '$_id'] }, email: '$user.email', full_name: '$user.full_name' } },
+    { $project: { user: 0 } },
+  ]).toArray();
+  return rows as any[];
 }
 
 export async function approveRoleRequest(requestId: number, adminUserId: number, jurisdictions: string[]): Promise<{ success: boolean; error?: string }> {
