@@ -11,7 +11,7 @@ import {
 } from '../types/signals';
 import { normalizeDistrict } from './district_normalizer';
 import { calculateBasinInfluence } from './basin_routing_service';
-import { insertForecastSnapshot } from '../db/sqlite';
+import { insertForecastSnapshot } from '../db/mongo';
 
 export function classifyForecastRainfall(mm: number): 'LIGHT' | 'MODERATE' | 'HEAVY' | 'VERY_HEAVY' | 'EXTREME' {
   if (mm >= 115.5) return 'EXTREME';
@@ -413,12 +413,12 @@ export function projectDistrictRisk(
   };
 }
 
-export function projectDistrictTimeline(
+export async function projectDistrictTimeline(
   districtStatus: any,
   allDistrictStatuses?: Record<string, any>,
   forecastDataMode: ForecastDataMode = 'SIMULATED_FORECAST',
   options: { persistSnapshot?: boolean } = {}
-): DistrictForecastTimeline {
+): Promise<DistrictForecastTimeline> {
   const districtId = districtStatus.district_id || districtStatus.id || 'TEL-HYD';
   const norm = normalizeDistrict(districtId);
   const dId = norm.canonical_id;
@@ -475,7 +475,7 @@ export function projectDistrictTimeline(
   // write to the ledger on every request; a scheduled job or admin action should persist.
   if (options.persistSnapshot) {
     try {
-      insertForecastSnapshot({
+      await insertForecastSnapshot({
       district_id: dId,
       forecast_generated_at: h6.generatedAt,
       forecast_horizon_hours: 6,
@@ -530,10 +530,10 @@ export function projectDistrictTimeline(
   };
 }
 
-export function projectAllDistricts(
+export async function projectAllDistricts(
   allDistrictStatuses: any[],
   forecastDataMode: ForecastDataMode = 'SIMULATED_FORECAST'
-): Record<string, DistrictForecastTimeline> {
+): Promise<Record<string, DistrictForecastTimeline>> {
   const statusMap: Record<string, any> = {};
   for (const d of allDistrictStatuses) {
     const id = d.district_id || d.id;
@@ -544,7 +544,7 @@ export function projectAllDistricts(
   for (const d of allDistrictStatuses) {
     const id = d.district_id || d.id;
     if (id) {
-      results[id] = projectDistrictTimeline(d, statusMap, forecastDataMode);
+      results[id] = await projectDistrictTimeline(d, statusMap, forecastDataMode);
     }
   }
   return results;

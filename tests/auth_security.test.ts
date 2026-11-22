@@ -1,15 +1,13 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
+import { getMongoTestUri, assertSafeMongoTestUri, spawnTestServer, stopTestServer, connectTestMongo, dropTestDb } from './helpers/mongo_integration_harness';
 
-const PROJECT_ROOT = process.cwd();
-const SOURCE_DB = path.join(PROJECT_ROOT, 'data', 'neerdrishti.db');
-const TEST_DB = path.join(os.tmpdir(), `neerdrishti-auth-test-${Date.now()}.db`);
-const PORT = 3210;
-const BASE = `http://127.0.0.1:${PORT}`;
+const MONGO_URI = getMongoTestUri();
+assertSafeMongoTestUri(MONGO_URI);
+let PORT = 3210;
+let BASE = `http://127.0.0.1:${PORT}`;
+let mongoCtx: any;
 
 let server: ChildProcessWithoutNullStreams | null = null;
 let serverLog = '';
@@ -68,34 +66,21 @@ async function waitForServer(): Promise<void> {
 }
 
 before(async () => {
-  fs.copyFileSync(SOURCE_DB, TEST_DB);
-  server = spawn(process.execPath, ['dist/server.cjs'], {
-    cwd: PROJECT_ROOT,
-    env: {
-      ...process.env,
-      NODE_ENV: 'test',
-      PORT: String(PORT),
-      DATABASE_PATH: TEST_DB,
-      COOKIE_SECURE: 'false',
-      AUTH_DEV_EXPOSE_TOKENS: 'true',
-    },
-  });
-  server.stdout.on('data', (chunk) => {
-    serverLog += chunk.toString();
-    if (!setupToken) {
-      const match = serverLog.match(/setup token \(valid 60 minutes\):[\s\S]*?\n\s+([A-Za-z0-9_-]{20,})/);
-      if (match) setupToken = match[1];
-    }
-  });
-  server.stderr.on('data', (chunk) => { serverLog += chunk.toString(); });
-  await waitForServer();
+  mongoCtx = await connectTestMongo(MONGO_URI);
+  await mongoCtx.db.dropDatabase();
+  const started = await spawnTestServer({ port: PORT, mongoUri: MONGO_URI, extraEnv: { AUTH_DEV_EXPOSE_TOKENS: 'true' } });
+  server = started.server; BASE = started.base;
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const m = started.getLog().match(/setup token \(valid 60 minutes\):[\s\S]*?\n\s+([A-Za-z0-9_-]{20,})/);
+    if (m) { setupToken = m[1]; break; }
+    await new Promise(r => setTimeout(r, 200));
+  }
 });
 
-after(() => {
-  if (server) server.kill();
-  try { fs.unlinkSync(TEST_DB); } catch { /* ignore */ }
-  try { fs.unlinkSync(`${TEST_DB}-wal`); } catch { /* ignore */ }
-  try { fs.unlinkSync(`${TEST_DB}-shm`); } catch { /* ignore */ }
+after(async () => {
+  await stopTestServer(server);
+  if (mongoCtx) { await dropTestDb(mongoCtx.client, mongoCtx.dbName); await mongoCtx.client.close(); }
 });
 
 test('unauthenticated access to protected endpoints is rejected', async () => {

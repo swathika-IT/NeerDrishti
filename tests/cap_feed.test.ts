@@ -1,14 +1,11 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
-import { DatabaseSync } from 'node:sqlite';
+import { getMongoTestUri, connectMongoTest, dropMongoTestDb, closeMongoTest, assertSafeMongoTestUri } from './helpers/mongo_test_harness';
 import { parseCapAlert, parseRssItems } from '../src/services/cap/cap_parser';
 
-const PROJECT_ROOT = process.cwd();
-const SOURCE_DB = path.join(PROJECT_ROOT, 'data', 'neerdrishti.db');
-const TEST_DB = path.join(os.tmpdir(), `neerdrishti-cap-test-${Date.now()}.db`);
+const MONGO_URI = getMongoTestUri();
+assertSafeMongoTestUri(MONGO_URI);
+let mongo: any;
 
 const IMD_FEED = 'https://mock.cap.test/imd.xml';
 const SACHET_STATE_FEED = 'https://mock.cap.test/sachet-state.xml';
@@ -123,22 +120,19 @@ function configureFeeds(options: { imd?: boolean; sachet?: boolean; includeIndia
   process.env.SACHET_CAP_INCLUDE_ALL_INDIA = options.includeIndia === false ? 'false' : 'true';
 }
 
-function clearCapRows(): void {
-  const db = new DatabaseSync(TEST_DB);
-  db.exec("DELETE FROM external_signals WHERE signal_type = 'official_alert'");
-  db.close();
+async function clearCapRows(): Promise<void> {
+  await mongo.db.collection('external_signals').deleteMany({ signal_type: 'official_alert' });
 }
-
-function capRows(): any[] {
-  const db = new DatabaseSync(TEST_DB);
-  const rows = db.prepare("SELECT * FROM external_signals WHERE signal_type = 'official_alert' ORDER BY id").all() as any[];
-  db.close();
-  return rows;
+async function capRows(): Promise<any[]> {
+  return await mongo.db.collection('external_signals').find({ signal_type: 'official_alert' }).sort({ id: 1, _id: 1 }).toArray();
 }
 
 before(async () => {
-  fs.copyFileSync(SOURCE_DB, TEST_DB);
-  process.env.DATABASE_PATH = TEST_DB;
+  process.env.MONGODB_URI = MONGO_URI;
+  mongo = await connectMongoTest(MONGO_URI);
+  await mongo.db.dropDatabase();
+  const { initDatabase } = await import('../src/db/mongo');
+  await initDatabase();
   process.env.IMD_CAP_RSS_URL = IMD_FEED;
   process.env.SACHET_CAP_RSS_URL = SACHET_STATE_FEED;
   process.env.SACHET_CAP_ALL_INDIA_RSS_URL = SACHET_INDIA_FEED;
@@ -168,9 +162,7 @@ before(async () => {
 
 after(() => {
   globalThis.fetch = originalFetch;
-  for (const file of [TEST_DB, `${TEST_DB}-wal`, `${TEST_DB}-shm`]) {
-    try { fs.unlinkSync(file); } catch { /* ignore */ }
-  }
+
 });
 
 test('CAP parser rejects malformed documents instead of fabricating alerts', () => {
@@ -211,7 +203,7 @@ test('district matcher handles names, abbreviations, and statewide phrases', () 
 });
 
 test('refresh ingests IMD and SACHET alerts, maps districts, and prefilters all-India items', async () => {
-  clearCapRows();
+  await clearCapRows();
   configureFeeds({ includeIndia: true });
   const now = new Date();
   const imdLink = 'https://mock.cap.test/cap/imd-1';
@@ -244,9 +236,9 @@ test('refresh ingests IMD and SACHET alerts, maps districts, and prefilters all-
   assert.equal(result.status, 'HEALTHY');
   assert.equal(result.stored, 3);
   assert.equal(result.duplicates, 1);
-  assert.equal(capRows().length, 3);
+  assert.equal((await capRows()).length, 3);
 
-  const rows = capRows();
+  const rows = await capRows();
   assert.ok(rows.every(row => row.signal_type === 'official_alert'));
   assert.ok(rows.every(row => row.data_mode === 'FORECAST'));
   assert.ok(rows.every(row => row.unit === 'severity_code'));
@@ -266,14 +258,14 @@ test('refresh ingests IMD and SACHET alerts, maps districts, and prefilters all-
 });
 
 test('re-refresh suppresses duplicate alerts without adding rows', async () => {
-  const beforeCount = capRows().length;
+  const beforeCount = (await capRows()).length;
   const rerun = await imdCapService.refresh();
-  assert.equal(capRows().length, beforeCount);
+  assert.equal((await capRows()).length, beforeCount);
   assert.ok(rerun.duplicates >= beforeCount);
 });
 
 test('newer Update supersedes the same identifier and district', async () => {
-  clearCapRows();
+  await clearCapRows();
   configureFeeds({ imd: false, includeIndia: false });
   const firstSent = new Date(Date.now() - 60_000);
   const firstLink = 'https://mock.cap.test/cap/update-1';
@@ -337,7 +329,7 @@ test('Cancel is stored and excluded from active alerts', async () => {
 });
 
 test('expired warnings are stored but excluded from active alerts', async () => {
-  clearCapRows();
+  await clearCapRows();
   const sent = new Date(Date.now() - 3 * 3600000);
   const link = 'https://mock.cap.test/cap/expired-1';
   routes[SACHET_STATE_FEED] = { body: rssFeed([rssItem('Expired warning for Warangal', link, sent)]) };
@@ -358,7 +350,7 @@ test('expired warnings are stored but excluded from active alerts', async () => 
 });
 
 test('Test and Exercise CAP alerts are never stored as operational warnings', async () => {
-  clearCapRows();
+  await clearCapRows();
   const now = new Date();
   const testLink = 'https://mock.cap.test/cap/test-1';
   const exerciseLink = 'https://mock.cap.test/cap/exercise-1';
@@ -373,11 +365,11 @@ test('Test and Exercise CAP alerts are never stored as operational warnings', as
   const result = await imdCapService.refresh();
   assert.equal(result.stored, 0);
   assert.equal(result.skipped, 2);
-  assert.equal(capRows().length, 0);
+  assert.equal((await capRows()).length, 0);
 });
 
 test('empty feeds are reported STALE, never HEALTHY', async () => {
-  clearCapRows();
+  await clearCapRows();
   configureFeeds({ imd: false, includeIndia: false });
   routes[SACHET_STATE_FEED] = { body: rssFeed([]) };
   const result = await imdCapService.refresh();
@@ -390,13 +382,13 @@ test('empty feeds are reported STALE, never HEALTHY', async () => {
 });
 
 test('feed outages are reported OFFLINE without throwing or fabricating alerts', async () => {
-  clearCapRows();
+  await clearCapRows();
   configureFeeds({ imd: false, includeIndia: false });
   routes[SACHET_STATE_FEED] = { status: 500, body: 'upstream error' };
   fetchCalls = [];
   const result = await imdCapService.refresh();
   assert.equal(result.status, 'OFFLINE');
   assert.ok(result.errors >= 1);
-  assert.equal(capRows().length, 0);
+  assert.equal((await capRows()).length, 0);
   assert.ok(fetchCalls.filter(url => url === SACHET_STATE_FEED).length >= 2, 'transient feed failures should be retried');
 });

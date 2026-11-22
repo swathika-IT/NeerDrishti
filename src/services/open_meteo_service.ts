@@ -1,7 +1,7 @@
 import { DistrictMetadata } from '../types';
 import { rainfallService } from './rainfall_service';
 import { DATA_SOURCES } from '../config/data_sources';
-import { getDb } from '../db/sqlite';
+import { getRecentLiveSignalForDistrict } from '../db/mongo';
 
 const OPEN_METEO_BASE_URL = (process.env.OPEN_METEO_BASE_URL || 'https://api.open-meteo.com').replace(/\/$/, '');
 const OPEN_METEO_ARCHIVE_URL = (process.env.OPEN_METEO_ARCHIVE_URL || 'https://archive-api.open-meteo.com').replace(/\/$/, '');
@@ -109,17 +109,9 @@ export class OpenMeteoService {
     throw lastError || new Error('Open-Meteo request failed after retries');
   }
 
-  private getRecentLiveSignalForDistrict(districtId: string, sourceName: string): any | null {
+  private async getRecentLiveSignal(districtId: string, sourceName: string): Promise<any | null> {
     try {
-      const db = getDb();
-      const row = db.prepare(`
-        SELECT * FROM external_signals
-        WHERE district_id = ? AND source_name = ? AND signal_type = 'rainfall'
-          AND data_mode = 'LIVE' AND is_valid = 1
-        ORDER BY recorded_at DESC
-        LIMIT 1
-      `).get(districtId, sourceName);
-      return row || null;
+      return await getRecentLiveSignalForDistrict(districtId, sourceName);
     } catch {
       return null;
     }
@@ -144,7 +136,7 @@ export class OpenMeteoService {
 
     // Duplicate suppression across refreshes (and restarts): skip ingest when a fresh
     // Open-Meteo LIVE signal already exists for this district within the suppression window.
-    const recentLive = this.getRecentLiveSignalForDistrict(district_id, sourceName);
+    const recentLive = await this.getRecentLiveSignal(district_id, sourceName);
     if (recentLive) {
       const ageMs = Date.now() - new Date(String(recentLive.recorded_at)).getTime();
       if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < DUPLICATE_SUPPRESSION_WINDOW_MS) {
@@ -248,7 +240,7 @@ export class OpenMeteoService {
 
       // Ingest into central deterministic signal pipeline (LIVE signal).
       // Preserve observation + retrieval timestamps; freshness computed at read time.
-      const ingestRes = rainfallService.ingestObservation({
+      const ingestRes = await rainfallService.ingestObservation({
         rawDistrict: district_name,
         rainfall_mm: rainfall_mm_24h,
         burst_3h_mm: rainfall_mm_3h,
@@ -346,7 +338,7 @@ export class OpenMeteoService {
       const averageDaily = total / daysCount;
 
       // Ingest as HISTORICAL signal baseline
-      rainfallService.ingestObservation({
+      await rainfallService.ingestObservation({
         rawDistrict: district_name,
         rainfall_mm: Math.round(averageDaily * 10) / 10,
         burst_3h_mm: Math.round(peakHour * 10) / 10,

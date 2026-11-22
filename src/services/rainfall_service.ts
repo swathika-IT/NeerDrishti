@@ -15,7 +15,7 @@ import {
   insertExternalSignal,
   getLatestRainfallSignal,
   detectDuplicateSignal,
-} from '../db/sqlite';
+} from '../db/mongo';
 
 export interface RawRainfallObservation {
   rawDistrict: string;
@@ -50,7 +50,7 @@ export class RainfallService {
    * Ingests a raw external rainfall observation, normalizes the district,
    * validates bounds, computes freshness, avoids duplicate writes, and persists to SQLite.
    */
-  public ingestObservation(raw: RawRainfallObservation): { success: boolean; signal?: UniversalSignal; error?: string } {
+  public async ingestObservation(raw: RawRainfallObservation): Promise<{ success: boolean; signal?: UniversalSignal; error?: string }> {
     // 1. District Normalization
     const norm = normalizeDistrict(raw.rawDistrict);
     if (!norm.resolved || !norm.districtId) {
@@ -102,7 +102,7 @@ export class RainfallService {
     if (!valRes.isValid) {
       // Store invalid signal for audit trace if possible, but flag isValid=false
       try {
-        insertExternalSignal({
+        await insertExternalSignal({
           district_id: norm.districtId,
           source_name: sourceName,
           source_type: sourceType,
@@ -123,9 +123,9 @@ export class RainfallService {
     }
 
     // 4. Duplicate Check
-    const isDup = detectDuplicateSignal(norm.districtId, sourceName, 'rainfall', recordedAt);
+    const isDup = await detectDuplicateSignal(norm.districtId, sourceName, 'rainfall', recordedAt);
     if (!isDup) {
-      insertExternalSignal({
+      await insertExternalSignal({
         district_id: norm.districtId,
         source_name: sourceName,
         source_type: sourceType,
@@ -152,19 +152,19 @@ export class RainfallService {
    * 3. Verified Historical Baseline
    * 4. Simulated Scenario Telemetry
    */
-  public selectRainfallForDistrict(
+  public async selectRainfallForDistrict(
     districtId: string,
     districtName: string,
     simulatedRainfall24h: number,
     simulatedRainfall3h: number,
     scenarioName: string = 'Normal Conditions'
-  ): DistrictRainfallContext {
+  ): Promise<DistrictRainfallContext> {
     const norm = normalizeDistrict(districtId || districtName);
     const resolvedId = norm.resolved ? norm.districtId : districtId.toLowerCase();
     const resolvedName = norm.resolved ? norm.canonicalName : districtName;
 
-    // Check latest valid signal stored in SQLite
-    const latestDbSignal = getLatestRainfallSignal(resolvedId);
+    // Check latest valid signal stored in MongoDB
+    const latestDbSignal = await getLatestRainfallSignal(resolvedId);
     let unverifiedSkipReason: string | undefined;
     const latestSourceVerifiedLive = latestDbSignal ? isSourceVerifiedLive(latestDbSignal.source_name) : false;
 

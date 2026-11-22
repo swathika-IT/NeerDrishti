@@ -1,4 +1,4 @@
-import { getDb } from '../db/sqlite';
+import { getDb } from '../db/mongo';
 import { DistrictAlert } from '../types/alerts';
 
 export type NotificationChannel = 
@@ -37,44 +37,10 @@ export interface DecisionSupportNotification {
 class NotificationService {
   private inMemoryLedger: DecisionSupportNotification[] = [];
 
-  constructor() {
-    this.initLedgerTable();
-  }
-
-  private initLedgerTable() {
-    try {
-      const db = getDb();
-      if (db) {
-        db.exec(`
-          CREATE TABLE IF NOT EXISTS notification_history (
-            id TEXT PRIMARY KEY,
-            district_id TEXT NOT NULL,
-            district_name TEXT NOT NULL,
-            alert_level TEXT NOT NULL,
-            channel TEXT NOT NULL,
-            title TEXT NOT NULL,
-            message TEXT NOT NULL,
-            recommended_action TEXT,
-            signals_triggered TEXT,
-            status TEXT NOT NULL,
-            recipient_group TEXT NOT NULL,
-            timestamp TEXT NOT NULL,
-            is_prototype INTEGER DEFAULT 1,
-            metadata TEXT
-          );
-          CREATE INDEX IF NOT EXISTS idx_notif_dist ON notification_history(district_id);
-          CREATE INDEX IF NOT EXISTS idx_notif_time ON notification_history(timestamp);
-        `);
-      }
-    } catch (err) {
-      console.warn('[NotificationService] SQLite notification table initialization warning:', err);
-    }
-  }
-
   /**
    * Dispatches a prototype decision support notification
    */
-  public dispatchNotification(params: {
+  public async dispatchNotification(params: {
     districtId: string;
     districtName: string;
     alertLevel: 'NORMAL' | 'ADVISORY' | 'WATCH' | 'WARNING' | 'EMERGENCY';
@@ -85,7 +51,7 @@ class NotificationService {
     signalsTriggered?: string[];
     recipientGroup?: DecisionSupportNotification['recipientGroup'];
     metadata?: Record<string, any>;
-  }): DecisionSupportNotification {
+  }): Promise<DecisionSupportNotification> {
     const id = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const channel = params.channel || 'In-App Decision Support';
     const timestamp = new Date().toISOString();
@@ -118,35 +84,27 @@ class NotificationService {
       this.inMemoryLedger.pop();
     }
 
-    // Persist to SQLite
+    // Persist to MongoDB
     try {
       const db = getDb();
-      if (db) {
-        const stmt = db.prepare(`
-          INSERT INTO notification_history (
-            id, district_id, district_name, alert_level, channel, title, message,
-            recommended_action, signals_triggered, status, recipient_group, timestamp, is_prototype, metadata
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-        stmt.run(
-          notif.id,
-          notif.districtId,
-          notif.districtName,
-          notif.alertLevel,
-          notif.channel,
-          notif.title,
-          notif.message,
-          notif.recommendedAction,
-          JSON.stringify(notif.signalsTriggered),
-          notif.status,
-          notif.recipientGroup,
-          notif.timestamp,
-          1,
-          JSON.stringify(notif.metadata || {})
-        );
-      }
+      await db.collection('notification_history').insertOne({
+        id: notif.id,
+        district_id: notif.districtId,
+        district_name: notif.districtName,
+        alert_level: notif.alertLevel,
+        channel: notif.channel,
+        title: notif.title,
+        message: notif.message,
+        recommended_action: notif.recommendedAction,
+        signals_triggered: JSON.stringify(notif.signalsTriggered),
+        status: notif.status,
+        recipient_group: notif.recipientGroup,
+        timestamp: notif.timestamp,
+        is_prototype: 1,
+        metadata: JSON.stringify(notif.metadata || {}),
+      });
     } catch (err) {
-      console.warn('[NotificationService] Failed persisting notification to SQLite:', err);
+      console.warn('[NotificationService] Failed persisting notification to MongoDB:', err);
     }
 
     return notif;
@@ -155,14 +113,14 @@ class NotificationService {
   /**
    * Generates prototype notification broadcast for an evaluated district alert
    */
-  public dispatchAlertBroadcast(alert: DistrictAlert): DecisionSupportNotification[] {
+  public async dispatchAlertBroadcast(alert: DistrictAlert): Promise<DecisionSupportNotification[]> {
     const notifications: DecisionSupportNotification[] = [];
     const triggerNames = (alert.trigger_signals || []).map(t => t.description || t.signal_type);
 
     const level = alert.alert_level === 'CRITICAL' ? 'EMERGENCY' : alert.alert_level === 'HIGH' ? 'WARNING' : alert.alert_level === 'ELEVATED' ? 'WATCH' : alert.alert_level === 'WATCH' ? 'ADVISORY' : 'NORMAL';
 
     // 1. In-App Control Room Notification
-    const inApp = this.dispatchNotification({
+    const inApp = await this.dispatchNotification({
       districtId: alert.district_id,
       districtName: alert.district_name,
       alertLevel: level,
@@ -177,7 +135,7 @@ class NotificationService {
 
     // 2. High severity mock multi-channel dispatch (SMS / Push)
     if (alert.alert_level === 'HIGH' || alert.alert_level === 'CRITICAL') {
-      const sms = this.dispatchNotification({
+       const sms = await this.dispatchNotification({
         districtId: alert.district_id,
         districtName: alert.district_name,
         alertLevel: level,
@@ -197,22 +155,14 @@ class NotificationService {
   /**
    * Retrieves notification ledger history
    */
-  public getHistory(limit: number = 50, districtId?: string): DecisionSupportNotification[] {
+  public async getHistory(limit: number = 50, districtId?: string): Promise<DecisionSupportNotification[]> {
     try {
       const db = getDb();
-      if (db) {
-        let query = 'SELECT * FROM notification_history';
-        const params: any[] = [];
-        if (districtId) {
-          query += ' WHERE district_id = ? OR district_name = ?';
-          params.push(districtId, districtId);
-        }
-        query += ' ORDER BY timestamp DESC LIMIT ?';
-        params.push(limit);
-
-        const rows = db.prepare(query).all(...params) as any[];
-        if (rows && rows.length > 0) {
-          return rows.map(r => ({
+      const filter: any = {};
+      if (districtId) filter.$or = [{ district_id: districtId }, { district_name: districtId }];
+      const rows = await db.collection('notification_history').find(filter, { sort: { timestamp: -1 }, limit }).toArray();
+      if (rows && rows.length > 0) {
+        return rows.map(r => ({
             id: r.id,
             districtId: r.district_id,
             districtName: r.district_name,
@@ -234,10 +184,9 @@ class NotificationService {
             lastAttemptAt: r.last_attempt_at ?? null,
             metadata: r.metadata ? JSON.parse(r.metadata) : undefined,
           }));
-        }
       }
     } catch (err) {
-      console.warn('[NotificationService] Error querying SQLite history, using memory:', err);
+      console.warn('[NotificationService] Error querying MongoDB history, using memory:', err);
     }
 
     if (districtId) {
@@ -249,8 +198,8 @@ class NotificationService {
   /**
    * Get notification stats
    */
-  public getStats() {
-    const history = this.getHistory(200);
+  public async getStats() {
+    const history = await this.getHistory(200);
     const byChannel: Record<string, number> = {};
     const byLevel: Record<string, number> = {};
 

@@ -7,7 +7,7 @@ import {
   type CapAlert,
   type CapRssItem,
 } from './cap_parser';
-import { getDb, insertExternalSignal } from '../../db/sqlite';
+import { getDb as getMongoDb, insertExternalSignal } from '../../db/mongo';
 import { DATA_SOURCES } from '../../config/data_sources';
 
 const DEFAULT_IMD_CAP_URL = 'https://cap-sources.s3.amazonaws.com/in-imd-en/rss.xml';
@@ -497,15 +497,15 @@ export class ImdCapService {
     throw lastError || new Error('CAP request failed');
   }
 
-  private hasStoredAlert(sourceName: string, identifier: string, sent: string, districtId: string): boolean {
-    const db = getDb();
-    const row = db.prepare(`
-      SELECT id FROM external_signals
-      WHERE source_name = ? AND signal_type = 'official_alert' AND district_id = ?
-        AND json_extract(metadata, '$.cap_identifier') = ?
-        AND json_extract(metadata, '$.sent') = ?
-      LIMIT 1
-    `).get(sourceName, districtId, identifier, sent);
+  private async hasStoredAlert(sourceName: string, identifier: string, sent: string, districtId: string): Promise<boolean> {
+    const db = getMongoDb();
+    const row = await db.collection('external_signals').findOne({
+      source_name: sourceName,
+      signal_type: 'official_alert',
+      district_id: districtId,
+      'metadata.cap_identifier': identifier,
+      'metadata.sent': sent,
+    });
     return Boolean(row);
   }
 
@@ -576,13 +576,13 @@ export class ImdCapService {
 
     for (const districtId of targets) {
       const storageKey = `${feed.sourceName}|${alert.identifier}|${alert.sent}|${districtId}`;
-      if (seenStorageKeys.has(storageKey) || this.hasStoredAlert(feed.sourceName, alert.identifier, alert.sent, districtId)) {
+      if (seenStorageKeys.has(storageKey) || await this.hasStoredAlert(feed.sourceName, alert.identifier, alert.sent, districtId)) {
         result.duplicates++;
         continue;
       }
       seenStorageKeys.add(storageKey);
       try {
-        this.storeAlert(feed, alert, scope, capUrl, districtId);
+        await this.storeAlert(feed, alert, scope, capUrl, districtId);
         result.stored++;
       } catch (err: any) {
         result.errors++;
@@ -731,15 +731,15 @@ export class ImdCapService {
     }
   }
 
-  private storeAlert(
+  private async storeAlert(
     feed: CapFeedDefinition,
     alert: CapAlert,
     scope: AreaMatch,
     capUrl: string,
     districtId: string,
-  ): void {
+  ): Promise<void> {
     const areaDesc = alert.info.areas.map(a => a.areaDesc).join('; ');
-    insertExternalSignal({
+    await insertExternalSignal({
       district_id: districtId,
       source_name: feed.sourceName,
       source_type: CAP_SOURCE_TYPE,
@@ -848,15 +848,10 @@ export class ImdCapService {
     };
   }
 
-  public getStoredAlerts(limit: number = 50, telanganaOnly: boolean = false, activeOnly: boolean = false): CapAlertView[] {
+  public async getStoredAlerts(limit: number = 50, telanganaOnly: boolean = false, activeOnly: boolean = false): Promise<CapAlertView[]> {
     try {
-      const db = getDb();
-      const rows = db.prepare(`
-        SELECT * FROM external_signals
-        WHERE signal_type = 'official_alert'
-        ORDER BY recorded_at DESC
-        LIMIT 1000
-      `).all() as any[];
+      const db = getMongoDb();
+      const rows = await db.collection('external_signals').find({ signal_type: 'official_alert' }).sort({ recorded_at: -1 }).limit(1000).toArray();
 
       const latestByAlert = new Map<string, CapAlertView>();
       for (const row of rows) {
@@ -911,8 +906,8 @@ export class ImdCapService {
     }
   }
 
-  public getAlertSummary() {
-    const active = this.getStoredAlerts(500, true, true);
+  public async getAlertSummary() {
+    const active = await this.getStoredAlerts(500, true, true);
     const bySeverity: Record<string, number> = { Extreme: 0, Severe: 0, Moderate: 0, Minor: 0, Unknown: 0 };
     for (const alert of active) {
       const severity = alert.severity || 'Unknown';
@@ -922,7 +917,7 @@ export class ImdCapService {
       active_count: active.length,
       district_count: active.filter(a => a.areaScope === 'DISTRICT').length,
       state_count: active.filter(a => a.areaScope === 'STATE').length,
-      cancelled_count: this.getStoredAlerts(500, true, false).filter(a => a.lifecycle === 'CANCELLED').length,
+      cancelled_count: (await this.getStoredAlerts(500, true, false)).filter(a => a.lifecycle === 'CANCELLED').length,
       by_severity: bySeverity,
       generated_at: new Date().toISOString(),
     };

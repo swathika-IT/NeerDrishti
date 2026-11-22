@@ -1,0 +1,56 @@
+name: MongoDB Application Integration Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  mongo-integration:
+    runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      MONGODB_TEST_URI: mongodb://127.0.0.1:27017/neerdrishti_ci_test
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Wait for MongoDB
+        env:
+          MONGODB_TEST_URI: ${{ env.MONGODB_TEST_URI }}
+        run: |
+          node <<'NODE'
+          const net = require('net');
+          const uri = process.env.MONGODB_TEST_URI || '';
+          let parsed;
+          try { parsed = new URL(uri); } catch { console.error('Invalid MONGODB_TEST_URI'); process.exit(1); }
+          if (parsed.protocol !== 'mongodb:') { console.error('Atlas/SRV/remote protocols not allowed'); process.exit(1); }
+          if (!['127.0.0.1','localhost'].includes(parsed.hostname)) { console.error('Only localhost MongoDB allowed'); process.exit(1); }
+          const dbName = decodeURIComponent(parsed.pathname.replace(/^\//,'').split('/')[0] || '');
+          if (!dbName.startsWith('neerdrishti_ci_test')) { console.error('Unsafe test db name'); process.exit(1); }
+          const port = Number(parsed.port || 27017);
+          (async () => {
+            for (let i=0;i<30;i++) {
+              const ok = await new Promise(resolve => {
+                const s = net.createConnection({host: parsed.hostname, port}, () => { s.end(); resolve(true); });
+                s.on('error', () => resolve(false));
+                s.setTimeout(2000, () => { s.destroy(); resolve(false); });
+              });
+              if (ok) { console.log('MongoDB ready'); process.exit(0); }
+              await new Promise(r => setTimeout(r, 2000));
+            }
+            console.error('MongoDB not ready'); process.exit(1);
+          })();
+          NODE
+      - name: Integration tests
+        env:
+          MONGODB_TEST_URI: ${{ env.MONGODB_TEST_URI }}
+        run: npx tsx --test tests/auth_security.test.ts tests/report_security.test.ts tests/cap_feed.test.ts tests/notification_dry_run.test.ts tests/open_meteo.test.ts tests/historical_import.test.ts tests/pipeline_contract.test.ts
+      - run: npm run lint
+      - run: npm run build

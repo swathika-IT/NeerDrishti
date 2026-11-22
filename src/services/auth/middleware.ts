@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import { getSessionUser, type AuthUser, type UserRole } from './session_store';
-import { getOfficialJurisdictions, isApprovedOfficial } from './auth_service';
+import { getOfficialJurisdictions, isApprovedOfficial } from '../../db/mongo';
 import { hashToken } from './tokens';
 
 export const SESSION_COOKIE = 'nd_session';
@@ -78,16 +78,16 @@ function sameOriginOk(req: Request): boolean {
   }
 }
 
-export const attachAuth: RequestHandler = (req: Request, _res: Response, next: NextFunction) => {
+export const attachAuth: RequestHandler = async (req: Request, _res: Response, next: NextFunction) => {
   const token = getSessionTokenFromRequest(req);
   if (token) {
-    const user = getSessionUser(token);
+    const user = await getSessionUser(token);
     if (user) {
       (req as AuthenticatedRequest).auth = {
         user,
         sessionToken: token,
         sessionTokenHash: hashToken(token),
-        jurisdictions: user.role === 'OFFICIAL' ? getOfficialJurisdictions(user.id) : [],
+        jurisdictions: user.role === 'OFFICIAL' ? await getOfficialJurisdictions(user.id) : [],
       };
     }
   }
@@ -115,17 +115,39 @@ export const requireRole = (...roles: UserRole[]): RequestHandler =>
     next();
   };
 
-/** Requires an OFFICIAL whose application has been admin-approved. */
-export const requireApprovedOfficial: RequestHandler = (req, res, next) => {
-  const authReq = req as AuthenticatedRequest;
-  if (!authReq.auth) return res.status(401).json({ error: 'Authentication required.' });
-  const { user } = authReq.auth;
-  if (user.role === 'ADMIN') return next();
-  if (user.role !== 'OFFICIAL' || !isApprovedOfficial(user.id)) {
-    return res.status(403).json({ error: 'Official access is pending administrator approval.' });
-  }
-  next();
-};
+/**
+ * Requires an OFFICIAL whose application has been admin-approved.
+ * Exported as a factory so the approval lookup can be substituted in tests.
+ */
+export function createRequireApprovedOfficial(
+  checkApproved: (userId: number) => Promise<boolean> = isApprovedOfficial
+): RequestHandler {
+  return async (req, res, next) => {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.auth) return res.status(401).json({ error: 'Authentication required.' });
+    const { user } = authReq.auth;
+    if (user.role === 'ADMIN') return next();
+    if (user.role !== 'OFFICIAL') {
+      return res.status(403).json({ error: 'Official access is pending administrator approval.' });
+    }
+    try {
+      const approved = await checkApproved(user.id);
+      if (!approved) {
+        return res.status(403).json({ error: 'Official access is pending administrator approval.' });
+      }
+      next();
+    } catch (err) {
+      // Deny access when approval status cannot be verified.
+      console.error(JSON.stringify({
+        type: 'official_approval_check_failed',
+        error: String((err as any)?.message || 'unknown approval check error'),
+      }));
+      return res.status(403).json({ error: 'Official access is pending administrator approval.' });
+    }
+  };
+}
+
+export const requireApprovedOfficial: RequestHandler = createRequireApprovedOfficial();
 
 export function hasJurisdiction(authReq: AuthenticatedRequest, districtId: string): boolean {
   if (!authReq.auth) return false;
