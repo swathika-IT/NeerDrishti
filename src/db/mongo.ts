@@ -251,7 +251,7 @@ export async function initDatabase(): Promise<void> {
 
   await C('alerts_history').createIndex({ idempotency_key: 1 }, {
     unique: true,
-    partialFilterExpression: { idempotency_key: { $exists: true, $ne: null } },
+    partialFilterExpression: { idempotency_key: { $type: 'string' } },
   });
 }
 
