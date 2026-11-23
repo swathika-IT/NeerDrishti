@@ -76,6 +76,16 @@ before(async () => {
     if (m) { setupToken = m[1]; break; }
     await new Promise(r => setTimeout(r, 200));
   }
+  const now = new Date();
+  await mongoCtx.db.collection('citizen_reports').insertMany([
+    { _id: 1, id: 1, district_id: 'hyderabad', location_description: 'Musi River bank', incident_type: 'Urban Flooding', severity: 'High', description: 'Fixture report for jurisdiction test in Hyderabad district.', image_reference: null, lat: 17.385, lng: 78.4867, status: 'PENDING', reporter_user_id: null, reported_at: now, created_at: now, updated_at: now, confidence_score: 0.5, is_spam: 0 },
+    { _id: 3, id: 3, district_id: 'warangal', location_description: 'Warangal low-lying area', incident_type: 'Urban Flooding', severity: 'High', description: 'Fixture report for jurisdiction test in Warangal district.', image_reference: null, lat: 17.969, lng: 79.594, status: 'PENDING', reporter_user_id: null, reported_at: now, created_at: now, updated_at: now, confidence_score: 0.5, is_spam: 0 },
+  ]);
+  await mongoCtx.db.collection('sequences').updateOne(
+    { name: 'citizen_reports' },
+    { $max: { value: 3 } },
+    { upsert: true }
+  );
 });
 
 after(async () => {
