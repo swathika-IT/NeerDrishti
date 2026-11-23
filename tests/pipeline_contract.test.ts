@@ -12,6 +12,7 @@ let mongo: any;
 const j = async (p: string) => (await fetch(`${BASE}${p}`)).json() as Promise<any>;
 
 before(async () => {
+  process.env.MONGODB_URI = MONGO_URI;
   mongo = await connectTestMongo(MONGO_URI);
   await mongo.db.dropDatabase();
   const { initDatabase } = await import('../src/db/mongo');

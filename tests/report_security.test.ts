@@ -51,6 +51,7 @@ before(async () => {
   }
   assert.ok(setupToken, 'setup token required');
   await req('POST', '/api/auth/setup-admin', anonJar, { token: setupToken, email: 'admin@nd.test', password: 'AdminPass12345' });
+  anonJar.cookie = '';
   await req('POST', '/api/auth/login', adminJar, { email: 'admin@nd.test', password: 'AdminPass12345' });
   await req('POST', '/api/auth/register', citizenJar, { email: 'reporter@nd.test', password: 'CitizenPass123', full_name: 'Reporter One' });
   await req('POST', '/api/auth/login', citizenJar, { email: 'reporter@nd.test', password: 'CitizenPass123' });
