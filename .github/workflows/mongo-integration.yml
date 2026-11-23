@@ -5,9 +5,10 @@ on:
   pull_request:
 
 jobs:
-  mongo-integration:
+  auth-security:
+    name: auth_security
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     services:
       mongodb:
         image: mongo:7
@@ -17,8 +18,8 @@ jobs:
       MONGODB_TEST_URI: mongodb://127.0.0.1:27017/neerdrishti_ci_test
       NODE_ENV: test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
       - run: npm ci
@@ -50,8 +51,374 @@ jobs:
           })();
           NODE
       - run: npm run build
-      - name: Integration tests
+      - name: Run auth_security tests
         env:
           MONGODB_TEST_URI: ${{ env.MONGODB_TEST_URI }}
-        run: npx tsx --test --test-concurrency=1 tests/auth_security.test.ts tests/report_security.test.ts tests/cap_feed.test.ts tests/notification_dry_run.test.ts tests/open_meteo.test.ts tests/historical_import.test.ts tests/pipeline_contract.test.ts
+        run: npx tsx --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap --test-reporter-destination=auth_security.tap tests/auth_security.test.ts
+      - name: Upload TAP
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tap-auth_security
+          path: auth_security.tap
+          if-no-files-found: warn
+
+  report-security:
+    name: report_security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      MONGODB_TEST_URI: mongodb://127.0.0.1:27017/neerdrishti_ci_test
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Wait for MongoDB
+        env:
+          MONGODB_TEST_URI: ${{ env.MONGODB_TEST_URI }}
+        run: |
+          node <<'NODE'
+          const net = require('net');
+          const uri = process.env.MONGODB_TEST_URI || '';
+          let parsed;
+          try { parsed = new URL(uri); } catch { console.error('Invalid MONGODB_TEST_URI'); process.exit(1); }
+          if (parsed.protocol !== 'mongodb:') { console.error('Atlas/SRV/remote protocols not allowed'); process.exit(1); }
+          if (!['127.0.0.1','localhost'].includes(parsed.hostname)) { console.error('Only localhost MongoDB allowed'); process.exit(1); }
+          const dbName = decodeURIComponent(parsed.pathname.replace(/^\//,'').split('/')[0] || '');
+          if (!dbName.startsWith('neerdrishti_ci_test')) { console.error('Unsafe test db name'); process.exit(1); }
+          const port = Number(parsed.port || 27017);
+          (async () => {
+            for (let i=0;i<30;i++) {
+              const ok = await new Promise(resolve => {
+                const s = net.createConnection({host: parsed.hostname, port}, () => { s.end(); resolve(true); });
+                s.on('error', () => resolve(false));
+                s.setTimeout(2000, () => { s.destroy(); resolve(false); });
+              });
+              if (ok) { console.log('MongoDB ready'); process.exit(0); }
+              await new Promise(r => setTimeout(r, 2000));
+            }
+            console.error('MongoDB not ready'); process.exit(1);
+          })();
+          NODE
+      - run: npm run build
+      - name: Run report_security tests
+        env:
+          MONGODB_TEST_URI: ${{ env.MONGODB_TEST_URI }}
+        run: npx tsx --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap --test-reporter-destination=report_security.tap tests/report_security.test.ts
+      - name: Upload TAP
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tap-report_security
+          path: report_security.tap
+          if-no-files-found: warn
+
+  cap-feed:
+    name: cap_feed
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      MONGODB_TEST_URI: mongodb://127.0.0.1:27017/neerdrishti_ci_test
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Wait for MongoDB
+        env:
+          MONGODB_TEST_URI: ${{ env.MONGODB_TEST_URI }}
+        run: |
+          node <<'NODE'
+          const net = require('net');
+          const uri = process.env.MONGODB_TEST_URI || '';
+          let parsed;
+          try { parsed = new URL(uri); } catch { console.error('Invalid MONGODB_TEST_URI'); process.exit(1); }
+          if (parsed.protocol !== 'mongodb:') { console.error('Atlas/SRV/remote protocols not allowed'); process.exit(1); }
+          if (!['127.0.0.1','localhost'].includes(parsed.hostname)) { console.error('Only localhost MongoDB allowed'); process.exit(1); }
+          const dbName = decodeURIComponent(parsed.pathname.replace(/^\//,'').split('/')[0] || '');
+          if (!dbName.startsWith('neerdrishti_ci_test')) { console.error('Unsafe test db name'); process.exit(1); }
+          const port = Number(parsed.port || 27017);
+          (async () => {
+            for (let i=0;i<30;i++) {
+              const ok = await new Promise(resolve => {
+                const s = net.createConnection({host: parsed.hostname, port}, () => { s.end(); resolve(true); });
+                s.on('error', () => resolve(false));
+                s.setTimeout(2000, () => { s.destroy(); resolve(false); });
+              });
+              if (ok) { console.log('MongoDB ready'); process.exit(0); }
+              await new Promise(r => setTimeout(r, 2000));
+            }
+            console.error('MongoDB not ready'); process.exit(1);
+          })();
+          NODE
+      - run: npm run build
+      - name: Run cap_feed tests
+        env:
+          MONGODB_TEST_URI: ${{ env.MONGODB_TEST_URI }}
+        run: npx tsx --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap --test-reporter-destination=cap_feed.tap tests/cap_feed.test.ts
+      - name: Upload TAP
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tap-cap_feed
+          path: cap_feed.tap
+          if-no-files-found: warn
+
+  notification-dry-run:
+    name: notification_dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      MONGODB_TEST_URI: mongodb://127.0.0.1:27017/neerdrishti_ci_test
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Wait for MongoDB
+        env:
+          MONGODB_TEST_URI: ${{ env.MONGODB_TEST_URI }}
+        run: |
+          node <<'NODE'
+          const net = require('net');
+          const uri = process.env.MONGODB_TEST_URI || '';
+          let parsed;
+          try { parsed = new URL(uri); } catch { console.error('Invalid MONGODB_TEST_URI'); process.exit(1); }
+          if (parsed.protocol !== 'mongodb:') { console.error('Atlas/SRV/remote protocols not allowed'); process.exit(1); }
+          if (!['127.0.0.1','localhost'].includes(parsed.hostname)) { console.error('Only localhost MongoDB allowed'); process.exit(1); }
+          const dbName = decodeURIComponent(parsed.pathname.replace(/^\//,'').split('/')[0] || '');
+          if (!dbName.startsWith('neerdrishti_ci_test')) { console.error('Unsafe test db name'); process.exit(1); }
+          const port = Number(parsed.port || 27017);
+          (async () => {
+            for (let i=0;i<30;i++) {
+              const ok = await new Promise(resolve => {
+                const s = net.createConnection({host: parsed.hostname, port}, () => { s.end(); resolve(true); });
+                s.on('error', () => resolve(false));
+                s.setTimeout(2000, () => { s.destroy(); resolve(false); });
+              });
+              if (ok) { console.log('MongoDB ready'); process.exit(0); }
+              await new Promise(r => setTimeout(r, 2000));
+            }
+            console.error('MongoDB not ready'); process.exit(1);
+          })();
+          NODE
+      - run: npm run build
+      - name: Run notification_dry_run tests
+        env:
+          MONGODB_TEST_URI: ${{ env.MONGODB_TEST_URI }}
+        run: npx tsx --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap --test-reporter-destination=notification_dry_run.tap tests/notification_dry_run.test.ts
+      - name: Upload TAP
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tap-notification_dry_run
+          path: notification_dry_run.tap
+          if-no-files-found: warn
+
+  open-meteo:
+    name: open_meteo
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      MONGODB_TEST_URI: mongodb://127.0.0.1:27017/neerdrishti_ci_test
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Wait for MongoDB
+        env:
+          MONGODB_TEST_URI: ${{ env.MONGODB_TEST_URI }}
+        run: |
+          node <<'NODE'
+          const net = require('net');
+          const uri = process.env.MONGODB_TEST_URI || '';
+          let parsed;
+          try { parsed = new URL(uri); } catch { console.error('Invalid MONGODB_TEST_URI'); process.exit(1); }
+          if (parsed.protocol !== 'mongodb:') { console.error('Atlas/SRV/remote protocols not allowed'); process.exit(1); }
+          if (!['127.0.0.1','localhost'].includes(parsed.hostname)) { console.error('Only localhost MongoDB allowed'); process.exit(1); }
+          const dbName = decodeURIComponent(parsed.pathname.replace(/^\//,'').split('/')[0] || '');
+          if (!dbName.startsWith('neerdrishti_ci_test')) { console.error('Unsafe test db name'); process.exit(1); }
+          const port = Number(parsed.port || 27017);
+          (async () => {
+            for (let i=0;i<30;i++) {
+              const ok = await new Promise(resolve => {
+                const s = net.createConnection({host: parsed.hostname, port}, () => { s.end(); resolve(true); });
+                s.on('error', () => resolve(false));
+                s.setTimeout(2000, () => { s.destroy(); resolve(false); });
+              });
+              if (ok) { console.log('MongoDB ready'); process.exit(0); }
+              await new Promise(r => setTimeout(r, 2000));
+            }
+            console.error('MongoDB not ready'); process.exit(1);
+          })();
+          NODE
+      - run: npm run build
+      - name: Run open_meteo tests
+        env:
+          MONGODB_TEST_URI: ${{ env.MONGODB_TEST_URI }}
+        run: npx tsx --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap --test-reporter-destination=open_meteo.tap tests/open_meteo.test.ts
+      - name: Upload TAP
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tap-open_meteo
+          path: open_meteo.tap
+          if-no-files-found: warn
+
+  historical-import:
+    name: historical_import
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      MONGODB_TEST_URI: mongodb://127.0.0.1:27017/neerdrishti_ci_test
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Wait for MongoDB
+        env:
+          MONGODB_TEST_URI: ${{ env.MONGODB_TEST_URI }}
+        run: |
+          node <<'NODE'
+          const net = require('net');
+          const uri = process.env.MONGODB_TEST_URI || '';
+          let parsed;
+          try { parsed = new URL(uri); } catch { console.error('Invalid MONGODB_TEST_URI'); process.exit(1); }
+          if (parsed.protocol !== 'mongodb:') { console.error('Atlas/SRV/remote protocols not allowed'); process.exit(1); }
+          if (!['127.0.0.1','localhost'].includes(parsed.hostname)) { console.error('Only localhost MongoDB allowed'); process.exit(1); }
+          const dbName = decodeURIComponent(parsed.pathname.replace(/^\//,'').split('/')[0] || '');
+          if (!dbName.startsWith('neerdrishti_ci_test')) { console.error('Unsafe test db name'); process.exit(1); }
+          const port = Number(parsed.port || 27017);
+          (async () => {
+            for (let i=0;i<30;i++) {
+              const ok = await new Promise(resolve => {
+                const s = net.createConnection({host: parsed.hostname, port}, () => { s.end(); resolve(true); });
+                s.on('error', () => resolve(false));
+                s.setTimeout(2000, () => { s.destroy(); resolve(false); });
+              });
+              if (ok) { console.log('MongoDB ready'); process.exit(0); }
+              await new Promise(r => setTimeout(r, 2000));
+            }
+            console.error('MongoDB not ready'); process.exit(1);
+          })();
+          NODE
+      - run: npm run build
+      - name: Run historical_import tests
+        env:
+          MONGODB_TEST_URI: ${{ env.MONGODB_TEST_URI }}
+        run: npx tsx --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap --test-reporter-destination=historical_import.tap tests/historical_import.test.ts
+      - name: Upload TAP
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tap-historical_import
+          path: historical_import.tap
+          if-no-files-found: warn
+
+  pipeline-contract:
+    name: pipeline_contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      MONGODB_TEST_URI: mongodb://127.0.0.1:27017/neerdrishti_ci_test
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Wait for MongoDB
+        env:
+          MONGODB_TEST_URI: ${{ env.MONGODB_TEST_URI }}
+        run: |
+          node <<'NODE'
+          const net = require('net');
+          const uri = process.env.MONGODB_TEST_URI || '';
+          let parsed;
+          try { parsed = new URL(uri); } catch { console.error('Invalid MONGODB_TEST_URI'); process.exit(1); }
+          if (parsed.protocol !== 'mongodb:') { console.error('Atlas/SRV/remote protocols not allowed'); process.exit(1); }
+          if (!['127.0.0.1','localhost'].includes(parsed.hostname)) { console.error('Only localhost MongoDB allowed'); process.exit(1); }
+          const dbName = decodeURIComponent(parsed.pathname.replace(/^\//,'').split('/')[0] || '');
+          if (!dbName.startsWith('neerdrishti_ci_test')) { console.error('Unsafe test db name'); process.exit(1); }
+          const port = Number(parsed.port || 27017);
+          (async () => {
+            for (let i=0;i<30;i++) {
+              const ok = await new Promise(resolve => {
+                const s = net.createConnection({host: parsed.hostname, port}, () => { s.end(); resolve(true); });
+                s.on('error', () => resolve(false));
+                s.setTimeout(2000, () => { s.destroy(); resolve(false); });
+              });
+              if (ok) { console.log('MongoDB ready'); process.exit(0); }
+              await new Promise(r => setTimeout(r, 2000));
+            }
+            console.error('MongoDB not ready'); process.exit(1);
+          })();
+          NODE
+      - run: npm run build
+      - name: Run pipeline_contract tests
+        env:
+          MONGODB_TEST_URI: ${{ env.MONGODB_TEST_URI }}
+        run: npx tsx --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap --test-reporter-destination=pipeline_contract.tap tests/pipeline_contract.test.ts
+      - name: Upload TAP
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tap-pipeline_contract
+          path: pipeline_contract.tap
+          if-no-files-found: warn
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+      - run: npm ci
       - run: npm run lint
