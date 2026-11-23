@@ -5,6 +5,7 @@ services:
     name: neerdrishti
     runtime: node
     plan: free
+    region: singapore
     branch: sqlite-to-mongo-staging
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start            # verifies MongoDB, then starts the server

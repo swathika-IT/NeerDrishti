@@ -1,12 +1,18 @@
 import { MongoClient } from 'mongodb';
 import {
+  APPROVED_EXCLUSIONS,
+  EXPECTED_APPROVED_IMPORT_TOTAL,
   acquireLock,
+  buildImportPlan,
   buildMappings,
+  formatImportPlanSummary,
   insertDocuments,
   openSourceDatabase,
+  recordPolicyExclusions,
   releaseLock,
   validateMongoUri,
   verifyCompletedCollection,
+  verifyPolicyExclusions,
 } from './importer_core';
 import { recoverStaleLock } from './recovery';
 
@@ -29,9 +35,26 @@ async function main() {
   const db = client.db();
   const state = db.collection('migration_state');
   const mappings = buildMappings(sqlite);
+  const plan = buildImportPlan(mappings, {
+    exclusions: APPROVED_EXCLUSIONS,
+    expectedTotal: EXPECTED_APPROVED_IMPORT_TOTAL,
+  });
 
-  console.log('Source tables:', mappings.length);
-  console.log('Mode:', dryRun ? 'DRY-RUN' : 'APPLY');
+  for (const line of formatImportPlanSummary(plan, dryRun ? 'DRY-RUN' : 'APPLY')) {
+    console.log(line);
+  }
+
+  const excludedNonEmpty: string[] = [];
+  for (const exclusion of plan.exclusions) {
+    const n = await db.collection(exclusion.collection).countDocuments();
+    if (n > 0) excludedNonEmpty.push(`${exclusion.collection}=${n}`);
+  }
+  if (excludedNonEmpty.length > 0) {
+    console.error('Policy-excluded collections are not empty:', excludedNonEmpty.join(', '));
+    await client.close();
+    sqlite.close();
+    process.exit(1);
+  }
 
   const existing = await db.listCollections().toArray();
   const checkpoints = await state.find({}).toArray();
@@ -66,7 +89,11 @@ async function main() {
   }
 
   try {
-    for (const { collection, docs } of mappings) {
+    if (!dryRun) {
+      await recordPolicyExclusions(state, plan);
+      await verifyPolicyExclusions(state, plan);
+    }
+    for (const { collection, docs } of plan.imports) {
       const collectionState = await state.findOne({ collection });
       if (!dryRun && await verifyCompletedCollection(db.collection(collection), collectionState, docs.length)) {
         console.log(`${collection}: already completed (${docs.length}), skipped`);
@@ -93,7 +120,9 @@ async function main() {
           { upsert: true }
         );
       }
-      console.log(`${collection}: ${result.inserted} inserted, ${result.skipped} skipped${dryRun ? ' (dry-run)' : ''}`);
+      if (!dryRun) {
+        console.log(`${collection}: ${result.inserted} inserted, ${result.skipped} skipped`);
+      }
     }
 
     if (lockAcquired) {

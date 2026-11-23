@@ -7,6 +7,24 @@ export interface MigrationMapping {
   docs: any[];
 }
 
+export interface ApprovedExclusion {
+  collection: string;
+  sourceCount: number;
+  reason: string;
+}
+
+/**
+ * Approved policy exclusions for the staging import. These collections are
+ * counted for reconciliation but never inserted, and are recorded in state.
+ */
+export const APPROVED_EXCLUSIONS = [
+  { collection: 'sessions', sourceCount: 3, reason: 'expired_or_revoked_session_records' },
+  { collection: 'email_verifications', sourceCount: 1, reason: 'expired_verification_record' },
+  { collection: 'password_resets', sourceCount: 0, reason: 'empty_collection' },
+] as const;
+
+export const EXPECTED_APPROVED_IMPORT_TOTAL = 3613;
+
 export interface InsertResult {
   inserted: number;
   skipped: number;
@@ -160,6 +178,141 @@ export function buildMappings(sqlite: DatabaseSync): MigrationMapping[] {
     { collection: 'schema_migrations', docs: schemaMigrations },
     { collection: 'sequences', docs: sequences },
   ];
+}
+
+export interface PlannedExclusion extends ApprovedExclusion {
+  actualSourceCount: number;
+  status: 'excluded_by_policy';
+}
+
+export interface ImportPlan {
+  sourceCollectionCount: number;
+  sourceTotal: number;
+  imports: MigrationMapping[];
+  exclusions: PlannedExclusion[];
+  importedTotal: number;
+  excludedTotal: number;
+}
+
+export function buildImportPlan(
+  mappings: MigrationMapping[],
+  options: {
+    exclusions?: readonly ApprovedExclusion[];
+    expectedTotal?: number;
+    validateExclusionCounts?: boolean;
+  } = {}
+): ImportPlan {
+  const exclusions = options.exclusions ?? APPROVED_EXCLUSIONS;
+  const excludedNames = new Set(exclusions.map((e) => e.collection));
+  if (excludedNames.size !== exclusions.length) {
+    throw new Error('Approved exclusions contain duplicate collection names');
+  }
+
+  const mappingsByName = new Map(mappings.map((m) => [m.collection, m]));
+  for (const exclusion of exclusions) {
+    const mapping = mappingsByName.get(exclusion.collection);
+    if (!mapping) {
+      throw new Error(`Approved exclusion references unknown collection: ${exclusion.collection}`);
+    }
+    if (options.validateExclusionCounts !== false && mapping.docs.length !== exclusion.sourceCount) {
+      throw new Error(
+        `Excluded collection count mismatch: ${exclusion.collection} expected=${exclusion.sourceCount} actual=${mapping.docs.length}`
+      );
+    }
+  }
+
+  const imports = mappings.filter((m) => !excludedNames.has(m.collection));
+  const plannedExclusions: PlannedExclusion[] = exclusions.map((exclusion) => ({
+    collection: exclusion.collection,
+    sourceCount: exclusion.sourceCount,
+    actualSourceCount: mappingsByName.get(exclusion.collection)!.docs.length,
+    reason: exclusion.reason,
+    status: 'excluded_by_policy' as const,
+  }));
+
+  const sourceTotal = mappings.reduce((sum, m) => sum + m.docs.length, 0);
+  const importedTotal = imports.reduce((sum, m) => sum + m.docs.length, 0);
+  const excludedTotal = plannedExclusions.reduce((sum, e) => sum + e.actualSourceCount, 0);
+  if (sourceTotal !== importedTotal + excludedTotal) {
+    throw new Error('Import plan count reconciliation failed');
+  }
+  if (options.expectedTotal !== undefined && importedTotal !== options.expectedTotal) {
+    throw new Error(`Planned import total mismatch: expected=${options.expectedTotal} actual=${importedTotal}`);
+  }
+
+  return {
+    sourceCollectionCount: mappings.length,
+    sourceTotal,
+    imports,
+    exclusions: plannedExclusions,
+    importedTotal,
+    excludedTotal,
+  };
+}
+
+export function formatImportPlanSummary(plan: ImportPlan, mode: 'DRY-RUN' | 'APPLY'): string[] {
+  const lines = [
+    `Source collections: ${plan.sourceCollectionCount}`,
+    `Mode: ${mode}`,
+    `Planned imported documents: ${plan.importedTotal}`,
+    `Excluded by policy: ${plan.exclusions.length}`,
+  ];
+  for (const mapping of plan.imports) {
+    lines.push(
+      mode === 'DRY-RUN'
+        ? `${mapping.collection}: ${mapping.docs.length} (dry-run)`
+        : `${mapping.collection}: ${mapping.docs.length} planned`
+    );
+  }
+  for (const exclusion of plan.exclusions) {
+    lines.push(
+      `${exclusion.collection}: EXCLUDED_BY_POLICY source=${exclusion.actualSourceCount} reason=${exclusion.reason}`
+    );
+  }
+  lines.push(`Imported documents: ${plan.importedTotal}`);
+  lines.push(`Excluded documents: ${plan.excludedTotal}`);
+  return lines;
+}
+
+export async function recordPolicyExclusions(
+  state: MigrationStateCollection,
+  plan: ImportPlan,
+  now: number = Date.now()
+): Promise<void> {
+  for (const exclusion of plan.exclusions) {
+    await state.updateOne(
+      { collection: exclusion.collection },
+      {
+        $set: {
+          collection: exclusion.collection,
+          status: 'excluded_by_policy',
+          policy: 'approved_exclusion',
+          sourceCount: exclusion.actualSourceCount,
+          reason: exclusion.reason,
+          recordedAt: new Date(now).toISOString(),
+        },
+      },
+      { upsert: true }
+    );
+  }
+}
+
+export async function verifyPolicyExclusions(state: MigrationStateCollection, plan: ImportPlan): Promise<boolean> {
+  for (const exclusion of plan.exclusions) {
+    const recorded = await state.findOne({ collection: exclusion.collection });
+    if (!recorded || recorded.status !== 'excluded_by_policy') {
+      throw new Error(`Missing policy-exclusion checkpoint: ${exclusion.collection}`);
+    }
+    if (recorded.policy !== 'approved_exclusion') {
+      throw new Error(`Invalid policy-exclusion marker: ${exclusion.collection}`);
+    }
+    if (Number(recorded.sourceCount) !== exclusion.actualSourceCount) {
+      throw new Error(
+        `Policy-exclusion count mismatch: ${exclusion.collection} expected=${exclusion.actualSourceCount} actual=${recorded.sourceCount}`
+      );
+    }
+  }
+  return true;
 }
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
