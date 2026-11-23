@@ -4,8 +4,8 @@ services:
   - type: web
     name: neerdrishti
     runtime: node
-    plan: starter
-    branch: main
+    plan: free
+    branch: sqlite-to-mongo-staging
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start            # verifies MongoDB, then starts the server
     healthCheckPath: /api/health/ready
