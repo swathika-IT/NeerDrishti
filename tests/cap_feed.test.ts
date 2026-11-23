@@ -162,6 +162,7 @@ before(async () => {
 
 after(async () => {
   globalThis.fetch = originalFetch;
+  try { imdCapService?.stopScheduledRefresh?.(); } catch {}
   if (mongo) {
     await dropMongoTestDb(mongo);
     await closeMongoTest(mongo);
