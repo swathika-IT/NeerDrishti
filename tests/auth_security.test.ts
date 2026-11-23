@@ -1,6 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { getMongoTestUri, assertSafeMongoTestUri, spawnTestServer, stopTestServer, connectTestMongo, dropTestDb } from './helpers/mongo_integration_harness';
 
 const MONGO_URI = getMongoTestUri();

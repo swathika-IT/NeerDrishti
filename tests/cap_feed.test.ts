@@ -160,9 +160,12 @@ before(async () => {
   matchAffectedAreas = serviceModule.matchAffectedAreas;
 });
 
-after(() => {
+after(async () => {
   globalThis.fetch = originalFetch;
-
+  if (mongo) {
+    await dropMongoTestDb(mongo);
+    await closeMongoTest(mongo);
+  }
 });
 
 test('CAP parser rejects malformed documents instead of fabricating alerts', () => {
