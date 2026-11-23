@@ -7,11 +7,15 @@ const DEFAULT_PRODUCTION_API_BASE = 'https://neerdrishti-production.up.railway.a
 const API_BASE_INSTALLED = Symbol.for('neerdrishti.apiFetchBase');
 
 function readApiBase(): string {
-  const env = (import.meta as any)?.env;
-  const raw = env && Object.prototype.hasOwnProperty.call(env, 'VITE_API_BASE_URL')
-    ? String(env.VITE_API_BASE_URL || '').trim()
-    : env?.PROD ? DEFAULT_PRODUCTION_API_BASE : '';
-  return raw.replace(/\/+$/, '');
+  try {
+    const configured = (import.meta as any).env.VITE_API_BASE_URL;
+    if (typeof configured === 'string' && configured.trim()) {
+      return configured.trim().replace(/\/+$/, '');
+    }
+    return (import.meta as any).env.PROD ? DEFAULT_PRODUCTION_API_BASE : '';
+  } catch {
+    return '';
+  }
 }
 
 export const API_BASE_URL = readApiBase();
