@@ -156,8 +156,12 @@ export default function App() {
             <div className="w-12 h-12 bg-rose-100 rounded-full flex items-center justify-center mb-4 text-rose-600 font-bold text-xl">
               !
             </div>
-            <h2 className="text-lg font-bold text-slate-800 mb-2">Telemetry Service Connection Error</h2>
-            <p className="text-sm text-slate-600 mb-6">{fetchError}</p>
+            <h2 className="text-lg font-bold text-slate-800 mb-2">Flood data service temporarily unavailable</h2>
+            <p className="text-sm text-slate-600">
+              NeerDrishti cannot reach the backend service right now, so no flood readings, alerts or reports are shown.
+              This page does not use placeholder data.
+            </p>
+            <p className="text-xs text-slate-500 mt-2 mb-6 break-words">{fetchError}</p>
             <button
               id="retry-connection-btn"
               onClick={() => fetchDistricts(3, 500)}
