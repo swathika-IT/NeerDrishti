@@ -3,6 +3,12 @@ import { DistrictForecastTimeline, DistrictForecastPoint } from './signals';
 import { DistrictAlert } from './alerts';
 
 export type UserQuestionIntent =
+  | 'GREETING'
+  | 'SMALL_TALK'
+  | 'INTRODUCTION'
+  | 'GRATITUDE'
+  | 'GENERAL_CONVERSATION'
+  | 'GENERAL_KNOWLEDGE'
   | 'DISTRICT_RISK'
   | 'FORECAST'
   | 'ALERT_EXPLANATION'
@@ -12,6 +18,18 @@ export type UserQuestionIntent =
   | 'SAFETY_GUIDANCE'
   | 'DATA_LIMITATION'
   | 'GENERAL_PROJECT_INFORMATION';
+
+export const FLOOD_INTENTS: ReadonlySet<UserQuestionIntent> = new Set<UserQuestionIntent>([
+  'DISTRICT_RISK',
+  'FORECAST',
+  'ALERT_EXPLANATION',
+  'DISTRICT_COMPARISON',
+  'BASIN_INFORMATION',
+  'CITIZEN_REPORT_SUMMARY',
+  'SAFETY_GUIDANCE',
+  'DATA_LIMITATION',
+  'GENERAL_PROJECT_INFORMATION',
+]);
 
 export interface IntentDetectionResult {
   intent: UserQuestionIntent;
@@ -178,6 +196,9 @@ export interface GroundedAIResponse {
   districtsInvolved: string[];
   isSimulated: boolean;
   isPrototype: boolean;
-  source: 'Meta Llama' | 'Deterministic Fallback' | 'Rule-Based Fallback';
+  source: 'Meta Llama' | 'Deterministic Fallback' | 'Rule-Based Fallback' | 'Local Conversation';
   timestamp: string;
+  conversationId?: string;
+  aiUnavailable?: boolean;
+  providerNote?: string;
 }

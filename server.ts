@@ -46,6 +46,7 @@ import { AlertEngine } from './src/services/alert_engine';
 import { DATA_SOURCES } from './src/config/data_sources';
 import { normalizeDistrict } from './src/services/district_normalizer';
 import { aiIntelligenceService } from './src/services/ai_intelligence_service';
+import { answerConversation, conversationStore, validateChatRequest } from './src/services/ai_conversation_service';
 import { knowledgeService } from './src/services/knowledge_service';
 import { intentService } from './src/services/intent_service';
 import { centralDataCoordinator } from './src/services/data/data_connector';
@@ -2188,41 +2189,59 @@ app.get('/api/reports/district/:district/summary', async (req, res) => {
 // PHASE G: GROUNDED AI ASSISTANT & RAG INTELLIGENCE API ENDPOINTS
 // ============================================================================
 
-// 1. Unified Grounded AI Chat Assistant
+// 1. Unified Conversational AI Chat Assistant
 app.post('/api/ai/chat', async (req, res) => {
   try {
     const aiIp = req.socket?.remoteAddress || 'unknown';
     if (!checkRateLimit(`ai-chat:${aiIp}`, 30, 60).allowed) {
       return res.status(429).json({ error: 'Too many AI requests. Please slow down.' });
     }
-    const { message, language, districtContext } = req.body;
-    if (!message || typeof message !== 'string') {
-      return res.status(400).json({ error: 'Field "message" is required.' });
+    const validated = validateChatRequest(req.body);
+    if (validated.ok === false) {
+      return res.status(validated.status).json({ error: validated.error });
     }
 
+    const authUserId = (req as AuthenticatedRequest).auth?.user?.id;
+    const ownerKey = authUserId ? `user:${authUserId}` : `ip:${aiIp}`;
     const allDistricts = await computeAllDistrictStatus();
-    const aiResponse = await aiIntelligenceService.answer_question(
-      message,
-      language,
-      districtContext,
-      allDistricts
-    );
+    const { response: aiResponse, conversationId } = await answerConversation({
+      message: validated.message,
+      language: validated.language,
+      districtContext: validated.districtContext,
+      conversationId: validated.conversationId,
+      ownerKey,
+      allDistricts,
+    });
 
-    // Keep backwards compatibility fields (reply, district, risk_score, risk_category) alongside full GroundedAIResponse
     const primaryDistrictName = aiResponse.districtsInvolved[0];
-    const targetDistrict = allDistricts.find(d => d.district === primaryDistrictName) || allDistricts[0];
+    const targetDistrict = primaryDistrictName
+      ? allDistricts.find(d => d.district === primaryDistrictName)
+      : undefined;
 
     res.json({
       reply: aiResponse.answer,
-      district: targetDistrict?.district || 'Telangana',
-      risk_score: targetDistrict?.flood_risk_score ?? 50,
-      risk_category: targetDistrict?.risk_category ?? 'MODERATE',
+      district: targetDistrict?.district || null,
+      risk_score: targetDistrict?.flood_risk_score ?? null,
+      risk_category: targetDistrict?.risk_category ?? null,
       ...aiResponse,
+      conversationId,
     });
   } catch (error: any) {
     console.error('Error in /api/ai/chat:', error);
-    res.status(500).json({ error: error.message || 'Failed to generate AI response.' });
+    res.status(500).json({ error: 'I could not generate a response just now. Please try again.' });
   }
+});
+
+app.post('/api/ai/chat/clear', (req, res) => {
+  const aiIp = req.socket?.remoteAddress || 'unknown';
+  if (!checkRateLimit(`ai-chat-clear:${aiIp}`, 30, 60).allowed) {
+    return res.status(429).json({ error: 'Too many requests. Please slow down.' });
+  }
+  const conversationId = typeof req.body?.conversationId === 'string' ? req.body.conversationId : '';
+  const authUserId = (req as AuthenticatedRequest).auth?.user?.id;
+  const ownerKey = authUserId ? `user:${authUserId}` : `ip:${aiIp}`;
+  conversationStore.clear(conversationId, ownerKey);
+  res.json({ cleared: true });
 });
 
 
