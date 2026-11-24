@@ -3,7 +3,7 @@
  * Never throws "Unexpected token '<'": HTML, empty and non-JSON bodies, network failures and HTTP errors are all
  * converted into a typed ApiError with a human-readable message.
  */
-const DEFAULT_PRODUCTION_API_BASE = 'https://neerdrishti-production.up.railway.app';
+const DEFAULT_PRODUCTION_API_BASE = 'https://neerdrishti-xc01.onrender.com';
 const API_BASE_INSTALLED = Symbol.for('neerdrishti.apiFetchBase');
 
 function readApiBase(): string {
