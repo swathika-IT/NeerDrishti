@@ -1,30 +1,11 @@
 import express from 'express';
+import { fileURLToPath } from 'url';
 import compression from 'compression';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
-import { 
-  initDatabase, 
-  insertReportWithClassification, 
-  getReports, 
-  getReportById, 
-  updateReportStatus, 
-  getDistrictAggregation, 
-  getAllDistrictAggregations,
-  getLatestRainfallSignal,
-  getDistrictSignals,
-  insertExternalSignal,
-  insertAlertRecord,
-  getAlertsHistoryForDistrict,
-  getAllAlertsHistory,
-  updateAlertStatus as updateDbAlertStatus,
-  getDb,
-  closeDb,
-  insertReportAttachment,
-  recordModerationTransition,
-  getModerationHistory
-} from './src/db/sqlite';
+import { initDatabase, getDb as getMongoDb, closeDb, getAlertsHistoryForDistrict, insertAlertRecord, updateAlertStatus as updateDbAlertStatus, insertReportWithClassification, getReports, getReportById, insertReportAttachment, updateReportStatus, getDistrictAggregation, getAllDistrictAggregations, getLatestRainfallSignal, getDistrictSignals, insertExternalSignal, getAllAlertsHistory, recordModerationTransition, getModerationHistory } from './src/db/mongo';
 import {
   REPORT_CATEGORIES,
   REPORT_SEVERITIES,
@@ -65,6 +46,7 @@ import { AlertEngine } from './src/services/alert_engine';
 import { DATA_SOURCES } from './src/config/data_sources';
 import { normalizeDistrict } from './src/services/district_normalizer';
 import { aiIntelligenceService } from './src/services/ai_intelligence_service';
+import { answerConversation, conversationStore, validateChatRequest } from './src/services/ai_conversation_service';
 import { knowledgeService } from './src/services/knowledge_service';
 import { intentService } from './src/services/intent_service';
 import { centralDataCoordinator } from './src/services/data/data_connector';
@@ -144,8 +126,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(attachAuth);
 
-// Initialize SQLite Database schema & seed data
-initDatabase();
+// Initialize MongoDB Database schema & seed data (async; awaited in startServer before listening)
 
 // Authentication & administration routes (Phase 5)
 registerAuthRoutes(app);
@@ -318,18 +299,18 @@ function calculateRainfallScore(rainfall24h: number, rainfall3h: number = 0): nu
 }
 
 // Composite Status Computation for Any District (combining hydro data + SQLite citizen report aggregation)
-function computeDistrictStatus(
+async function computeDistrictStatus(
   meta: DistrictMetadataFile,
   scenarioName: string = currentScenario,
   rainfallOverride: Record<string, number> = customRainfall
-) {
+): Promise<any> {
   const name = meta.district_name;
   const simRainfall24h = computeDistrictSimulationRainfall(meta, scenarioName, rainfallOverride);
   const simRainfall3h = Math.round((simRainfall24h * 0.28) * 10) / 10;
 
   // Authoritative Phase D1 Rainfall Selection:
   // Evaluates Live SQLite Signals -> Aging Signals -> Simulation Fallback
-  const rainCtx = rainfallService.selectRainfallForDistrict(
+  const rainCtx = await rainfallService.selectRainfallForDistrict(
     meta.district_id,
     name,
     simRainfall24h,
@@ -357,7 +338,7 @@ function computeDistrictStatus(
   const rainfallScore = calculateRainfallScore(rainfall24h, rainfall3h);
 
   // Retrieve actual aggregated citizen reports from SQLite
-  const repAgg = getDistrictAggregation(name);
+  const repAgg = await getDistrictAggregation(name);
   const citizenReportScore = repAgg.citizen_report_score;
 
   // Static factors come from data/district_features.json (single source of truth,
@@ -454,13 +435,13 @@ function computeDistrictStatus(
     major_past_events: meta.historical_flood_context || 'Monsoon seasonal runoff and drainage surges.',
     vulnerable_hotspots: name === 'Hyderabad' ? 'Nadeem Colony, Moosarambagh, Falaknuma, Alwal' : 'Low-lying culverts and municipal drain channels',
     primary_nala_network: name === 'Hyderabad' ? 'Musi River, Kukatpally Nala, Murki Nala' : 'Regional Stormwater Runoff Channels',
-    hydrological_summary: getDistrictHydrologicalSummary(meta.district_id, scenarioName),
+    hydrological_summary: await getDistrictHydrologicalSummary(meta.district_id, scenarioName),
   };
 
   const situation = situationFusionService.synthesizeDistrictSituation(baseStatus);
   baseStatus.situation_summary = situation;
 
-  const timeline = projectDistrictTimeline(baseStatus);
+  const timeline = await projectDistrictTimeline(baseStatus);
   baseStatus.forecast_timeline = timeline;
   baseStatus.forecast_summary = timeline.timeline.h6;
 
@@ -470,24 +451,24 @@ function computeDistrictStatus(
   return baseStatus;
 }
 
-function computeAllDistrictStatus(
+async function computeAllDistrictStatus(
   scenarioName: string = currentScenario,
   rainfallOverride: Record<string, number> = customRainfall
-) {
+): Promise<any[]> {
   const allDistricts = loadDistrictMetadata();
-  const baseList = allDistricts.map(meta => computeDistrictStatus(meta, scenarioName, rainfallOverride));
+  const baseList = await Promise.all(allDistricts.map(meta => computeDistrictStatus(meta, scenarioName, rainfallOverride)));
   const statusMap: Record<string, any> = {};
   for (const item of baseList) {
     if (item.district_id) statusMap[item.district_id] = item;
   }
-  return baseList.map(item => {
-    const timeline = projectDistrictTimeline(item, statusMap);
+  for (const item of baseList) {
+    const timeline = await projectDistrictTimeline(item, statusMap);
     item.forecast_timeline = timeline;
     item.forecast_summary = timeline.timeline.h6;
     const alert = AlertEngine.evaluateDistrictAlert(item);
     item.alert_intelligence = alert;
-    return item;
-  });
+  }
+  return baseList;
 }
 
 // Knowledge Base Loader
@@ -507,24 +488,24 @@ function getKnowledgeDoc(districtName: string): string {
 // API ROUTES
 // ==========================================
 
-function probeReadiness(): ReadinessChecks {
-  const db = getDb();
-  db.prepare('SELECT 1 AS ok').get();
-  const migration = db.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as { count: number };
+async function probeReadiness(): Promise<ReadinessChecks> {
+  const db = getMongoDb();
+  await db.command({ ping: 1 });
+  const districtCount = await db.collection('districts').countDocuments();
   return {
     database: 'ok',
-    migrations: Number(migration.count) > 0 ? 'ok' : 'error',
+    migrations: districtCount > 0 ? 'ok' : 'error',
   };
 }
 
 // 1. Health checks
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
   const config = getLlamaConfig();
   res.json({
     status: 'ok',
     app: 'NeerDrishti Flood Intelligence Engine',
     phase: 'Phase C - Persistent Citizen Flood Intelligence',
-    database: 'SQLite (data/neerdrishti.db)',
+    database: 'MongoDB',
     llm_provider: 'Meta Llama (OpenAI-Compatible)',
     llm_model: config.model,
     districts_loaded: loadDistrictMetadata().length,
@@ -536,9 +517,15 @@ app.get('/api/health/live', (_req, res) => {
   res.status(200).json(buildLivenessPayload());
 });
 
-app.get('/api/health/ready', (_req, res) => {
+app.get('/api/health/ready', async (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  const payload = buildReadinessPayload(probeReadiness);
+  let checks: ReadinessChecks;
+  try {
+    checks = await probeReadiness();
+  } catch {
+    checks = { database: 'error', migrations: 'unknown' };
+  }
+  const payload = buildReadinessPayload(() => checks);
   res.status(payload.status === 'ready' ? 200 : 503).json(payload);
 });
 
@@ -581,10 +568,10 @@ app.get('/api/risk/model', (_req, res) => {
   });
 });
 
-app.get('/api/data/completeness', (req, res) => {
+app.get('/api/data/completeness', async (req, res) => {
   try {
     const view = getScenarioViewOverrides(req);
-    const all = computeAllDistrictStatus(view.scenario, view.rainfallOverride);
+    const all = await computeAllDistrictStatus(view.scenario, view.rainfallOverride);
     const features = loadDistrictFeatures();
     const rows = all.map((d: any) => {
       const f = features?.districts[d.district_id];
@@ -652,11 +639,11 @@ app.get('/api/data/completeness', (req, res) => {
 });
 
 // 2. Districts Metadata and Live Overview
-app.get('/api/districts', (req, res) => {
+app.get('/api/districts', async (req, res) => {
   try {
     const { category, zone, search, slim } = req.query;
     const view = getScenarioViewOverrides(req);
-    let districts = computeAllDistrictStatus(view.scenario, view.rainfallOverride);
+    let districts = await computeAllDistrictStatus(view.scenario, view.rainfallOverride);
 
     if (category && typeof category === 'string' && category.toLowerCase() !== 'all') {
       const catLower = category.toLowerCase();
@@ -677,7 +664,7 @@ app.get('/api/districts', (req, res) => {
       );
     }
 
-    const allDistricts = computeAllDistrictStatus(view.scenario, view.rainfallOverride);
+    const allDistricts = await computeAllDistrictStatus(view.scenario, view.rainfallOverride);
     const priorityCount = allDistricts.filter(d => d.monitoring_category === 'Priority Flood Monitoring').length;
     const standardCount = allDistricts.filter(d => d.monitoring_category === 'Standard Monitoring').length;
     const limitedCount = allDistricts.filter(d => d.monitoring_category === 'Limited Data').length;
@@ -721,10 +708,10 @@ app.get('/api/districts', (req, res) => {
 });
 
 // 2b. District 24-Hour Historical Rainfall Trend (Last 24 Hours)
-app.get('/api/districts/:district/rainfall-history', (req, res) => {
+app.get('/api/districts/:district/rainfall-history', async (req, res) => {
   try {
     const { district } = req.params;
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const dLower = district.toLowerCase().trim();
     const matched = allDistricts.find(d => 
       d.district.toLowerCase() === dLower || 
@@ -758,7 +745,7 @@ app.get('/api/districts/:district/rainfall-history', (req, res) => {
 });
 
 // 3. Update Simulation Scenario
-app.post('/api/simulation/set-scenario', requireAuth, requireRole('ADMIN'), (req, res) => {
+app.post('/api/simulation/set-scenario', requireAuth, requireRole('ADMIN'), async (req, res) => {
   try {
     const { scenario, custom_rainfall } = req.body;
 
@@ -787,7 +774,7 @@ app.post('/api/simulation/set-scenario', requireAuth, requireRole('ADMIN'), (req
     // Sync virtual IoT device mesh with the selected scenario
     iotDeviceRegistry.syncWithScenario(currentScenario);
 
-    const districts = computeAllDistrictStatus();
+    const districts = await computeAllDistrictStatus();
     const scenarioConfig = SCENARIO_BASE_CONFIG[currentScenario];
 
     res.json({
@@ -809,7 +796,7 @@ app.post('/api/simulation/set-scenario', requireAuth, requireRole('ADMIN'), (req
 });
 
 // 3b. Real-Time Rainfall Signal Query & Telemetry Ingestion (Phase D1)
-app.get('/api/signals/rainfall', (req, res) => {
+app.get('/api/signals/rainfall', async (req, res) => {
   try {
     const { district } = req.query;
     const allDistricts = loadDistrictMetadata();
@@ -825,7 +812,7 @@ app.get('/api/signals/rainfall', (req, res) => {
       if (!meta) {
         return res.status(404).json({ error: `Metadata missing for district '${district}'` });
       }
-      const status = computeDistrictStatus(meta);
+      const status = await computeDistrictStatus(meta);
       return res.json({
         district_id: status.district_id,
         district_name: status.district,
@@ -845,8 +832,8 @@ app.get('/api/signals/rainfall', (req, res) => {
     }
 
     // Return all 33 districts' rainfall telemetry overview
-    const signals = allDistricts.map(meta => {
-      const status = computeDistrictStatus(meta);
+    const signals = await Promise.all(allDistricts.map(async (meta) => {
+      const status = await computeDistrictStatus(meta);
       return {
         district_id: status.district_id,
         district_name: status.district,
@@ -860,11 +847,11 @@ app.get('/api/signals/rainfall', (req, res) => {
         recorded_at: status.rainfall_recorded_at || status.last_updated,
         is_simulated: status.is_simulated,
         rainfall_score: status.rainfall_score,
-        rainfall_contribution_pts: status.contributions.rainfall,
-      };
-    });
+      rainfall_contribution_pts: status.contributions.rainfall,
+       };
+     }));
 
-    res.json({
+     res.json({
       total_count: signals.length,
       signals,
     });
@@ -875,7 +862,7 @@ app.get('/api/signals/rainfall', (req, res) => {
 });
 
 // 3c. Ingest Live External Observation
-app.post('/api/signals/ingest', requireAuth, requireRole('ADMIN'), (req, res) => {
+app.post('/api/signals/ingest', requireAuth, requireRole('ADMIN'), async (req, res) => {
   try {
     const { district, rainfall_mm, burst_3h_mm, source_name, source_type, data_mode, recorded_at } = req.body;
     if (!district || rainfall_mm === undefined) {
@@ -884,7 +871,7 @@ app.post('/api/signals/ingest', requireAuth, requireRole('ADMIN'), (req, res) =>
       });
     }
 
-    const result = rainfallService.ingestObservation({
+    const result = await rainfallService.ingestObservation({
       rawDistrict: district,
       rainfall_mm: Number(rainfall_mm),
       burst_3h_mm: burst_3h_mm !== undefined ? Number(burst_3h_mm) : undefined,
@@ -948,7 +935,7 @@ app.post('/api/rainfall/refresh-live', requireAuth, requireRole('ADMIN'), async 
   }
 });
 
-app.get('/api/rainfall/live-status', (req, res) => {
+app.get('/api/rainfall/live-status', async (req, res) => {
   try {
     const status = openMeteoService.getStatus();
     res.json({
@@ -961,7 +948,7 @@ app.get('/api/rainfall/live-status', (req, res) => {
 });
 
 // 3c-2. Official CAP warning feeds (Epic 4)
-app.get('/api/cap/status', (req, res) => {
+app.get('/api/cap/status', async (req, res) => {
   try {
     res.json({
       ...imdCapService.getStatus(),
@@ -973,20 +960,20 @@ app.get('/api/cap/status', (req, res) => {
   }
 });
 
-app.get('/api/cap/summary', (req, res) => {
+app.get('/api/cap/summary', async (req, res) => {
   try {
-    res.json(imdCapService.getAlertSummary());
+    res.json(await imdCapService.getAlertSummary());
   } catch (error: any) {
     res.status(500).json({ error: error?.message || 'Failed to summarize CAP alerts' });
   }
 });
 
-app.get('/api/cap/alerts', (req, res) => {
+app.get('/api/cap/alerts', async (req, res) => {
   try {
     const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
     const telanganaOnly = req.query.telangana !== 'false';
     const activeOnly = req.query.active !== 'false';
-    const alerts = imdCapService.getStoredAlerts(limit, telanganaOnly, activeOnly);
+    const alerts = await imdCapService.getStoredAlerts(limit, telanganaOnly, activeOnly);
     res.json({
       total: alerts.length,
       filters: {
@@ -1022,7 +1009,7 @@ app.post('/api/cap/refresh', requireAuth, requireRole('ADMIN'), async (req, res)
 });
 
 // 3d. Central Data Sources Registry
-app.get('/api/sources', (req, res) => {
+app.get('/api/sources', async (req, res) => {
   try {
     const sourcesList = Object.entries(DATA_SOURCES).map(([key, source]) => ({
       registry_key: key,
@@ -1057,10 +1044,10 @@ app.get('/api/sources', (req, res) => {
 // ==========================================
 
 // 3e. GET /api/hydrology/stations - Station Registry
-app.get('/api/hydrology/stations', (req, res) => {
+app.get('/api/hydrology/stations', async (req, res) => {
   try {
     const { district_id, basin, active } = req.query;
-    let stations = getHydrologicalStations(typeof district_id === 'string' ? district_id : undefined);
+    let stations = await getHydrologicalStations(typeof district_id === 'string' ? district_id : undefined);
 
     if (basin && typeof basin === 'string') {
       stations = stations.filter(s => (s.basin || '').toLowerCase().includes(basin.toLowerCase()));
@@ -1081,10 +1068,10 @@ app.get('/api/hydrology/stations', (req, res) => {
 });
 
 // 3f. GET /api/hydrology/district/:districtId - District Hydrological Summary
-app.get('/api/hydrology/district/:districtId', (req, res) => {
+app.get('/api/hydrology/district/:districtId', async (req, res) => {
   try {
     const { districtId } = req.params;
-    const summary = getDistrictHydrologicalSummary(districtId, currentScenario);
+    const summary = await getDistrictHydrologicalSummary(districtId, currentScenario);
     res.json(summary);
   } catch (error: any) {
     console.error('Error in /api/hydrology/district/:districtId:', error);
@@ -1093,12 +1080,12 @@ app.get('/api/hydrology/district/:districtId', (req, res) => {
 });
 
 // 3g. GET /api/signals/hydrology - Hydrological Observations & Ledger
-app.get('/api/signals/hydrology', (req, res) => {
+app.get('/api/signals/hydrology', async (req, res) => {
   try {
     const { district_id, signal_type, status } = req.query;
 
     if (district_id && typeof district_id === 'string') {
-      const summary = getDistrictHydrologicalSummary(district_id, currentScenario);
+      const summary = await getDistrictHydrologicalSummary(district_id, currentScenario);
       let observations = summary.latest_observations;
       if (signal_type && typeof signal_type === 'string') {
         observations = observations.filter(o => o.signal_type === signal_type);
@@ -1122,7 +1109,7 @@ app.get('/api/signals/hydrology', (req, res) => {
     }
 
     // Return summaries across all districts
-    const summaries = getAllDistrictsHydrologicalSummaries(currentScenario);
+    const summaries = await getAllDistrictsHydrologicalSummaries(currentScenario);
     const summaryList = Object.values(summaries);
 
     res.json({
@@ -1138,7 +1125,7 @@ app.get('/api/signals/hydrology', (req, res) => {
 });
 
 // 3h. POST /api/signals/hydrology/ingest - Ingest Gauge / Water Telemetry
-app.post('/api/signals/hydrology/ingest', requireAuth, requireRole('ADMIN'), (req, res) => {
+app.post('/api/signals/hydrology/ingest', requireAuth, requireRole('ADMIN'), async (req, res) => {
   try {
     const {
       station_id,
@@ -1159,7 +1146,7 @@ app.post('/api/signals/hydrology/ingest', requireAuth, requireRole('ADMIN'), (re
       });
     }
 
-    const result = ingestHydrologicalObservation({
+    const result = await ingestHydrologicalObservation({
       stationId: String(station_id),
       rawDistrict: district,
       signalType: signal_type,
@@ -1192,9 +1179,9 @@ app.post('/api/signals/hydrology/ingest', requireAuth, requireRole('ADMIN'), (re
 // ==========================================
 
 // 3i. GET /api/situation/districts - Multi-Signal Situation Overview for all 33 Districts
-app.get('/api/situation/districts', (req, res) => {
+app.get('/api/situation/districts', async (req, res) => {
   try {
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const situations = allDistricts.map(d => d.situation_summary || situationFusionService.synthesizeDistrictSituation(d));
 
     const operationalCounts = {
@@ -1218,10 +1205,10 @@ app.get('/api/situation/districts', (req, res) => {
 });
 
 // 3j. GET /api/situation/district/:districtId - Detailed Situation for One District
-app.get('/api/situation/district/:districtId', (req, res) => {
+app.get('/api/situation/district/:districtId', async (req, res) => {
   try {
     const { districtId } = req.params;
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const norm = normalizeDistrict(districtId);
     const targetId = norm.resolved ? norm.districtId : districtId.toLowerCase().trim();
 
@@ -1245,10 +1232,10 @@ app.get('/api/situation/district/:districtId', (req, res) => {
 });
 
 // 3k. GET /api/situation/district/:districtId/explain - Explainable Multi-Signal Breakdown
-app.get('/api/situation/district/:districtId/explain', (req, res) => {
+app.get('/api/situation/district/:districtId/explain', async (req, res) => {
   try {
     const { districtId } = req.params;
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const norm = normalizeDistrict(districtId);
     const targetId = norm.resolved ? norm.districtId : districtId.toLowerCase().trim();
 
@@ -1299,11 +1286,11 @@ app.get('/api/situation/district/:districtId/explain', (req, res) => {
 // ==========================================
 
 // 1. GET /api/forecast/districts - Forecast projections for all 33 districts
-app.get('/api/forecast/districts', (req, res) => {
+app.get('/api/forecast/districts', async (req, res) => {
   try {
     const { horizon, outlook } = req.query;
-    const allDistricts = computeAllDistrictStatus();
-    const forecastMap = projectAllDistricts(allDistricts);
+    const allDistricts = await computeAllDistrictStatus();
+    const forecastMap = await projectAllDistricts(allDistricts);
 
     let list = Object.values(forecastMap);
 
@@ -1335,10 +1322,10 @@ app.get('/api/forecast/districts', (req, res) => {
 });
 
 // 2. GET /api/forecast/district/:districtId - Specific district forecast timeline
-app.get('/api/forecast/district/:districtId', (req, res) => {
+app.get('/api/forecast/district/:districtId', async (req, res) => {
   try {
     const { districtId } = req.params;
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const norm = normalizeDistrict(districtId);
     const targetId = norm.resolved ? norm.districtId : districtId.toLowerCase().trim();
 
@@ -1358,7 +1345,7 @@ app.get('/api/forecast/district/:districtId', (req, res) => {
       if (d.district_id) statusMap[d.district_id] = d;
     }
 
-    const timeline = projectDistrictTimeline(matched, statusMap);
+    const timeline = await projectDistrictTimeline(matched, statusMap);
     res.json(timeline);
   } catch (error: any) {
     console.error(`Error in /api/forecast/district/${req.params.districtId}:`, error);
@@ -1367,10 +1354,10 @@ app.get('/api/forecast/district/:districtId', (req, res) => {
 });
 
 // 3. GET /api/forecast/district/:districtId/timeline - Dedicated timeline payload
-app.get('/api/forecast/district/:districtId/timeline', (req, res) => {
+app.get('/api/forecast/district/:districtId/timeline', async (req, res) => {
   try {
     const { districtId } = req.params;
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const norm = normalizeDistrict(districtId);
     const targetId = norm.resolved ? norm.districtId : districtId.toLowerCase().trim();
 
@@ -1388,7 +1375,7 @@ app.get('/api/forecast/district/:districtId/timeline', (req, res) => {
       if (d.district_id) statusMap[d.district_id] = d;
     }
 
-    const forecast = projectDistrictTimeline(matched, statusMap);
+    const forecast = await projectDistrictTimeline(matched, statusMap);
     res.json({
       districtId: forecast.districtId,
       districtName: forecast.districtName,
@@ -1408,10 +1395,10 @@ app.get('/api/forecast/district/:districtId/timeline', (req, res) => {
 });
 
 // 4. GET /api/forecast/district/:districtId/explain - Textual explanation of projection drivers
-app.get('/api/forecast/district/:districtId/explain', (req, res) => {
+app.get('/api/forecast/district/:districtId/explain', async (req, res) => {
   try {
     const { districtId } = req.params;
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const norm = normalizeDistrict(districtId);
     const targetId = norm.resolved ? norm.districtId : districtId.toLowerCase().trim();
 
@@ -1429,7 +1416,7 @@ app.get('/api/forecast/district/:districtId/explain', (req, res) => {
       if (d.district_id) statusMap[d.district_id] = d;
     }
 
-    const forecast = projectDistrictTimeline(matched, statusMap);
+    const forecast = await projectDistrictTimeline(matched, statusMap);
     const h6 = forecast.timeline.h6;
 
     const primaryDriverText = h6.primaryProjectedDrivers.length > 0
@@ -1467,7 +1454,7 @@ app.get('/api/forecast/district/:districtId/explain', (req, res) => {
 });
 
 // 5. GET /api/forecast/sources - Metadata for NWP, AWS, CWC, and Basin propagation sources
-app.get('/api/forecast/sources', (req, res) => {
+app.get('/api/forecast/sources', async (req, res) => {
   res.json({
     forecast_sources: [
       {
@@ -1509,7 +1496,7 @@ app.get('/api/forecast/sources', (req, res) => {
 });
 
 // 6. GET /api/basin/connections - All hydrological basin connections
-app.get('/api/basin/connections', (req, res) => {
+app.get('/api/basin/connections', async (req, res) => {
   try {
     const connections = loadBasinConnections();
     res.json({ total: connections.length, connections });
@@ -1519,13 +1506,13 @@ app.get('/api/basin/connections', (req, res) => {
 });
 
 // 7. GET /api/basin/district/:districtId - Upstream and downstream connections for a district
-app.get('/api/basin/district/:districtId', (req, res) => {
+app.get('/api/basin/district/:districtId', async (req, res) => {
   try {
     const { districtId } = req.params;
     const norm = normalizeDistrict(districtId);
     const upstream = getUpstreamConnections(norm.canonical_id);
     const downstream = getDownstreamConnections(norm.canonical_id);
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const statusMap: Record<string, any> = {};
     for (const d of allDistricts) {
       if (d.district_id) statusMap[d.district_id] = d;
@@ -1549,10 +1536,10 @@ app.get('/api/basin/district/:districtId', (req, res) => {
 // ==========================================
 
 // 1. GET /api/alerts - All alerts for 33 districts with composable filtering
-app.get('/api/alerts', (req, res) => {
+app.get('/api/alerts', async (req, res) => {
   try {
     const { level, type, zone, data_mode, search } = req.query;
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const { alerts, summary } = AlertEngine.evaluateAllDistrictsAlerts(allDistricts);
 
     let filtered = alerts;
@@ -1598,9 +1585,9 @@ app.get('/api/alerts', (req, res) => {
 });
 
 // 2. GET /api/alerts/active - Active non-normal alerts
-app.get('/api/alerts/active', (req, res) => {
+app.get('/api/alerts/active', async (req, res) => {
   try {
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const { alerts, summary } = AlertEngine.evaluateAllDistrictsAlerts(allDistricts);
     const activeAlerts = alerts.filter(a => a.alert_level !== 'NORMAL');
 
@@ -1615,9 +1602,9 @@ app.get('/api/alerts/active', (req, res) => {
 });
 
 // 3. GET /api/alerts/summary - Statewide summary metrics
-app.get('/api/alerts/summary', (req, res) => {
+app.get('/api/alerts/summary', async (req, res) => {
   try {
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const { summary } = AlertEngine.evaluateAllDistrictsAlerts(allDistricts);
     res.json({ summary });
   } catch (error: any) {
@@ -1626,11 +1613,11 @@ app.get('/api/alerts/summary', (req, res) => {
 });
 
 // 4. GET /api/alerts/district/:districtId - Specific district alert payload
-app.get('/api/alerts/district/:districtId', (req, res) => {
+app.get('/api/alerts/district/:districtId', async (req, res) => {
   try {
     const { districtId } = req.params;
     const norm = normalizeDistrict(districtId);
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const matched = allDistricts.find(
       d => (d.district_id && d.district_id.toLowerCase() === norm.canonical_id) ||
            d.district.toLowerCase() === norm.district_name.toLowerCase() ||
@@ -1649,11 +1636,11 @@ app.get('/api/alerts/district/:districtId', (req, res) => {
 });
 
 // 5. GET /api/alerts/district/:districtId/history - Historic alert records
-app.get('/api/alerts/district/:districtId/history', (req, res) => {
+app.get('/api/alerts/district/:districtId/history', async (req, res) => {
   try {
     const { districtId } = req.params;
     const norm = normalizeDistrict(districtId);
-    const history = getAlertsHistoryForDistrict(norm.canonical_id, 20);
+    const history = await getAlertsHistoryForDistrict(norm.canonical_id, 20);
     res.json({
       districtId: norm.canonical_id,
       districtName: norm.district_name,
@@ -1666,16 +1653,16 @@ app.get('/api/alerts/district/:districtId/history', (req, res) => {
 });
 
 // 6. POST /api/alerts/recalculate - Force recalculation and snapshot archiving
-app.post('/api/alerts/recalculate', requireAuth, requireRole('ADMIN'), (req, res) => {
+app.post('/api/alerts/recalculate', requireAuth, requireRole('ADMIN'), async (req, res) => {
   try {
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const { alerts, summary } = AlertEngine.evaluateAllDistrictsAlerts(allDistricts);
 
-    // Save active non-normal alerts to SQLite for audit history
+    // Save active non-normal alerts to MongoDB for audit history
     for (const a of alerts) {
       if (a.alert_level !== 'NORMAL') {
         try {
-          insertAlertRecord(a);
+          await insertAlertRecord(a);
         } catch (e) {
           // Ignore duplicate alert_id logs
         }
@@ -1695,14 +1682,14 @@ app.post('/api/alerts/recalculate', requireAuth, requireRole('ADMIN'), (req, res
 });
 
 // 7. POST /api/alerts/:alertId/status - Update alert status
-app.post('/api/alerts/:alertId/status', requireAuth, requireApprovedOfficial, (req, res) => {
+app.post('/api/alerts/:alertId/status', requireAuth, requireApprovedOfficial, async (req, res) => {
   try {
     const { alertId } = req.params;
     const { status } = req.body;
     if (!status || !['Active', 'Acknowledged', 'Resolved', 'Expired'].includes(status)) {
       return res.status(400).json({ error: 'Valid status required: Active | Acknowledged | Resolved | Expired' });
     }
-    const updated = updateDbAlertStatus(alertId, status);
+    const updated = await updateDbAlertStatus(alertId, status);
     res.json({ success: updated, alert_id: alertId, status });
   } catch (error: any) {
     res.status(500).json({ error: error?.message || 'Failed to update alert status' });
@@ -1714,7 +1701,7 @@ app.post('/api/alerts/district/:districtId/ai-explain', async (req, res) => {
   try {
     const { districtId } = req.params;
     const norm = normalizeDistrict(districtId);
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const matched = allDistricts.find(
       d => (d.district_id && d.district_id.toLowerCase() === norm.canonical_id) ||
            d.district.toLowerCase() === norm.district_name.toLowerCase()
@@ -1833,10 +1820,10 @@ ${kbContext}`;
 // ==========================================
 
 // 4. GET /api/reports - Paginated & Filtered
-app.get('/api/reports', (req, res) => {
+app.get('/api/reports', async (req, res) => {
   try {
     const { district, severity, status, page, limit } = req.query;
-    const result = getReports({
+    const result = await getReports({
       district: typeof district === 'string' ? district : undefined,
       severity: typeof severity === 'string' ? severity : undefined,
       status: typeof status === 'string' ? status : undefined,
@@ -1851,14 +1838,14 @@ app.get('/api/reports', (req, res) => {
 });
 
 // 5. GET /api/reports/:id - Single Report with Classification
-app.get('/api/reports/:id', (req, res) => {
+app.get('/api/reports/:id', async (req, res) => {
   try {
     const reportId = Number(req.params.id);
     if (isNaN(reportId)) {
       return res.status(400).json({ error: 'Invalid report ID.' });
     }
 
-    const report = getReportById(reportId);
+    const report = await getReportById(reportId);
     if (!report) {
       return res.status(404).json({ error: `Report #${reportId} not found.` });
     }
@@ -1993,7 +1980,7 @@ app.post('/api/reports', async (req, res) => {
     });
 
     // Transactional Save into SQLite — status is always PENDING (server-controlled).
-    const inserted = insertReportWithClassification({
+    const inserted = await insertReportWithClassification({
       district_id: normDistrict.districtId,
       location_description: locDesc,
       incident_type: incType,
@@ -2011,7 +1998,7 @@ app.post('/api/reports', async (req, res) => {
     // Persist validated attachment metadata (no file bytes are written to disk; data URIs stay inline)
     if (attachment.kind) {
       try {
-        insertReportAttachment({
+        await insertReportAttachment({
           report_id: inserted.id,
           storage_path: attachment.kind === 'url' ? attachment.value! : 'inline:data-uri',
           mime_type: attachment.mimeType || 'image/*',
@@ -2026,19 +2013,21 @@ app.post('/api/reports', async (req, res) => {
     // Locality/coordinates are stored on the report row when provided (additive Phase 4 columns)
     if (coords.lat !== undefined || locDesc) {
       try {
-        getDb().prepare('UPDATE citizen_reports SET locality = ?, lat = ?, lng = ? WHERE id = ?')
-          .run(locDesc || null, coords.lat ?? null, coords.lng ?? null, inserted.id);
+        await getMongoDb().collection('citizen_reports').updateOne(
+          { _id: inserted.id },
+          { $set: { locality: locDesc || null, lat: coords.lat ?? null, lng: coords.lng ?? null } }
+        );
       } catch (locErr) {
         console.warn('Locality/coordinate persist failed (non-blocking):', locErr);
       }
     }
 
     // Compute updated district state
-    const updatedDistrict = computeDistrictStatus(matchedMeta);
+    const updatedDistrict = await computeDistrictStatus(matchedMeta);
 
     res.status(201).json({
       success: true,
-      report: getReportById(inserted.id) || inserted,
+      report: (await getReportById(inserted.id)) || inserted,
       classification: aiResult.classification,
       classification_source: aiResult.source,
       updated_district: updatedDistrict,
@@ -2053,7 +2042,7 @@ app.post('/api/reports', async (req, res) => {
 });
 
 // 7. PATCH /api/reports/:id/status - Status update (Demo Review Panel)
-app.patch('/api/reports/:id/status', requireAuth, requireApprovedOfficial, (req, res) => {
+app.patch('/api/reports/:id/status', requireAuth, requireApprovedOfficial, async (req, res) => {
   try {
     const reportId = Number(req.params.id);
     const { status, reason } = req.body;
@@ -2066,7 +2055,7 @@ app.patch('/api/reports/:id/status', requireAuth, requireApprovedOfficial, (req,
       return res.status(400).json({ error: 'Status is required.' });
     }
 
-    const existing = getReportById(reportId);
+    const existing = await getReportById(reportId);
     if (!existing) {
       return res.status(404).json({ error: `Report #${reportId} not found.` });
     }
@@ -2105,13 +2094,13 @@ app.patch('/api/reports/:id/status', requireAuth, requireApprovedOfficial, (req,
       }
     }
 
-    const updated = updateReportStatus(reportId, targetStatus);
+    const updated = await updateReportStatus(reportId, targetStatus);
     if (!updated) {
       return res.status(404).json({ error: `Report #${reportId} not found.` });
     }
 
     // Record the moderation transition (append-only history) with actor, timestamp and reason.
-    recordModerationTransition({
+    await recordModerationTransition({
       report_id: reportId,
       from_status: fromStatus,
       to_status: targetStatus,
@@ -2120,7 +2109,7 @@ app.patch('/api/reports/:id/status', requireAuth, requireApprovedOfficial, (req,
       reason: typeof reason === 'string' ? reason.slice(0, 300) : null,
     });
 
-    writeAuditLog({
+    await writeAuditLog({
       actorUserId: authReq.auth!.user.id,
       actorRole: authReq.auth!.user.role,
       action: 'REPORT_STATUS_UPDATED',
@@ -2132,7 +2121,7 @@ app.patch('/api/reports/:id/status', requireAuth, requireApprovedOfficial, (req,
 
     // Return updated report + refreshed district metrics
     const meta = getDistrictByName(updated.district_id);
-    const updatedDistrict = meta ? computeDistrictStatus(meta) : null;
+    const updatedDistrict = meta ? await computeDistrictStatus(meta) : null;
 
     res.json({
       success: true,
@@ -2147,11 +2136,11 @@ app.patch('/api/reports/:id/status', requireAuth, requireApprovedOfficial, (req,
 });
 
 // 7b. GET /api/reports/:id/history - Moderation history (officials: jurisdiction-scoped; admins: all)
-app.get('/api/reports/:id/history', requireAuth, requireApprovedOfficial, (req, res) => {
+app.get('/api/reports/:id/history', requireAuth, requireApprovedOfficial, async (req, res) => {
   try {
     const reportId = Number(req.params.id);
     if (isNaN(reportId)) return res.status(400).json({ error: 'Invalid report ID.' });
-    const existing = getReportById(reportId);
+    const existing = await getReportById(reportId);
     if (!existing) return res.status(404).json({ error: `Report #${reportId} not found.` });
 
     const authReq = req as AuthenticatedRequest;
@@ -2162,7 +2151,7 @@ app.get('/api/reports/:id/history', requireAuth, requireApprovedOfficial, (req, 
       return res.status(403).json({ error: 'This report is outside your assigned jurisdiction.' });
     }
 
-    res.json({ report_id: reportId, history: getModerationHistory(reportId) });
+    res.json({ report_id: reportId, history: await getModerationHistory(reportId) });
   } catch (error: any) {
     console.error('Error fetching moderation history:', error);
     res.status(500).json({ error: 'Failed to fetch moderation history.' });
@@ -2170,10 +2159,10 @@ app.get('/api/reports/:id/history', requireAuth, requireApprovedOfficial, (req, 
 });
 
 // 8. GET /api/reports/district/:district - District Reports List
-app.get('/api/reports/district/:district', (req, res) => {
+app.get('/api/reports/district/:district', async (req, res) => {
   try {
     const { district } = req.params;
-    const result = getReports({ district, limit: 100 });
+    const result = await getReports({ district, limit: 100 });
     res.json({ district, total: result.total, reports: result.reports });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch district reports.' });
@@ -2181,7 +2170,7 @@ app.get('/api/reports/district/:district', (req, res) => {
 });
 
 // 9. GET /api/reports/district/:district/summary - Reusable District Report Aggregation
-app.get('/api/reports/district/:district/summary', (req, res) => {
+app.get('/api/reports/district/:district/summary', async (req, res) => {
   try {
     const { district } = req.params;
     const meta = getDistrictByName(district);
@@ -2189,7 +2178,7 @@ app.get('/api/reports/district/:district/summary', (req, res) => {
       return res.status(404).json({ error: `District '${district}' not found.` });
     }
 
-    const summary = getDistrictAggregation(meta.district_name);
+    const summary = await getDistrictAggregation(meta.district_name);
     res.json(summary);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch district aggregation.' });
@@ -2200,41 +2189,59 @@ app.get('/api/reports/district/:district/summary', (req, res) => {
 // PHASE G: GROUNDED AI ASSISTANT & RAG INTELLIGENCE API ENDPOINTS
 // ============================================================================
 
-// 1. Unified Grounded AI Chat Assistant
+// 1. Unified Conversational AI Chat Assistant
 app.post('/api/ai/chat', async (req, res) => {
   try {
     const aiIp = req.socket?.remoteAddress || 'unknown';
     if (!checkRateLimit(`ai-chat:${aiIp}`, 30, 60).allowed) {
       return res.status(429).json({ error: 'Too many AI requests. Please slow down.' });
     }
-    const { message, language, districtContext } = req.body;
-    if (!message || typeof message !== 'string') {
-      return res.status(400).json({ error: 'Field "message" is required.' });
+    const validated = validateChatRequest(req.body);
+    if (validated.ok === false) {
+      return res.status(validated.status).json({ error: validated.error });
     }
 
-    const allDistricts = computeAllDistrictStatus();
-    const aiResponse = await aiIntelligenceService.answer_question(
-      message,
-      language,
-      districtContext,
-      allDistricts
-    );
+    const authUserId = (req as AuthenticatedRequest).auth?.user?.id;
+    const ownerKey = authUserId ? `user:${authUserId}` : `ip:${aiIp}`;
+    const allDistricts = await computeAllDistrictStatus();
+    const { response: aiResponse, conversationId } = await answerConversation({
+      message: validated.message,
+      language: validated.language,
+      districtContext: validated.districtContext,
+      conversationId: validated.conversationId,
+      ownerKey,
+      allDistricts,
+    });
 
-    // Keep backwards compatibility fields (reply, district, risk_score, risk_category) alongside full GroundedAIResponse
     const primaryDistrictName = aiResponse.districtsInvolved[0];
-    const targetDistrict = allDistricts.find(d => d.district === primaryDistrictName) || allDistricts[0];
+    const targetDistrict = primaryDistrictName
+      ? allDistricts.find(d => d.district === primaryDistrictName)
+      : undefined;
 
     res.json({
       reply: aiResponse.answer,
-      district: targetDistrict?.district || 'Telangana',
-      risk_score: targetDistrict?.flood_risk_score ?? 50,
-      risk_category: targetDistrict?.risk_category ?? 'MODERATE',
+      district: targetDistrict?.district || null,
+      risk_score: targetDistrict?.flood_risk_score ?? null,
+      risk_category: targetDistrict?.risk_category ?? null,
       ...aiResponse,
+      conversationId,
     });
   } catch (error: any) {
     console.error('Error in /api/ai/chat:', error);
-    res.status(500).json({ error: error.message || 'Failed to generate AI response.' });
+    res.status(500).json({ error: 'I could not generate a response just now. Please try again.' });
   }
+});
+
+app.post('/api/ai/chat/clear', (req, res) => {
+  const aiIp = req.socket?.remoteAddress || 'unknown';
+  if (!checkRateLimit(`ai-chat-clear:${aiIp}`, 30, 60).allowed) {
+    return res.status(429).json({ error: 'Too many requests. Please slow down.' });
+  }
+  const conversationId = typeof req.body?.conversationId === 'string' ? req.body.conversationId : '';
+  const authUserId = (req as AuthenticatedRequest).auth?.user?.id;
+  const ownerKey = authUserId ? `user:${authUserId}` : `ip:${aiIp}`;
+  conversationStore.clear(conversationId, ownerKey);
+  res.json({ cleared: true });
 });
 
 
@@ -2243,13 +2250,13 @@ app.post('/api/ai/chat', async (req, res) => {
 // DATA PIPELINE READ APIs (migration 004 tables; empty until ingestion scripts are run)
 // ==========================================
 app.get('/api/map/config', (_req, res) => res.json(getMapConfig()));
-app.get('/api/pipeline/registry', (_req, res) => res.json(pipe.getRegistry()));
-app.get('/api/pipeline/completeness', (_req, res) => res.json({ rows: pipe.getTelemetryCompleteness() }));
-app.get('/api/telemetry/river', (req, res) => res.json({ stations: pipe.getRiverTelemetry(typeof req.query.district === 'string' ? req.query.district : undefined) }));
-app.get('/api/telemetry/hydrology-features', (_req, res) => res.json({ districts: pipe.getHydrologyFeatures() }));
-app.get('/api/terrain', (_req, res) => res.json({ districts: pipe.getTerrain() }));
-app.get('/api/weather/forecast/:districtId', (req, res) => res.json(pipe.getDistrictForecast(req.params.districtId)));
-app.get('/api/weather/history/:districtId', (req, res) => res.json({ daily: pipe.getDistrictHistory(req.params.districtId, req.query.from as string, req.query.to as string) }));
+app.get('/api/pipeline/registry', async (_req, res) => res.json(await pipe.getRegistry()));
+app.get('/api/pipeline/completeness', async (_req, res) => res.json({ rows: await pipe.getTelemetryCompleteness() }));
+app.get('/api/telemetry/river', async (req, res) => res.json({ stations: await pipe.getRiverTelemetry(typeof req.query.district === 'string' ? req.query.district : undefined) }));
+app.get('/api/telemetry/hydrology-features', async (_req, res) => res.json({ districts: await pipe.getHydrologyFeatures() }));
+app.get('/api/terrain', async (_req, res) => res.json({ districts: await pipe.getTerrain() }));
+app.get('/api/weather/forecast/:districtId', async (req, res) => res.json(await pipe.getDistrictForecast(req.params.districtId)));
+app.get('/api/weather/history/:districtId', async (req, res) => res.json({ daily: await pipe.getDistrictHistory(req.params.districtId, req.query.from as string, req.query.to as string) }));
 app.get('/api/geo/districts', (_req, res) => {
   const g = pipe.getBoundariesGeoJson();
   if (!g) return res.json({ type: 'FeatureCollection', features: [], available: false, hint: 'District boundary file not loaded. Run: python -m scripts.pipeline.cli boundaries <District_NWIC.geojson>' });
@@ -2270,7 +2277,7 @@ app.post('/api/ai/citizen-brief', async (req, res) => {
       return res.status(400).json({ error: 'Field "district_id" is required.' });
     }
     const view = getScenarioViewOverrides(req);
-    const all = computeAllDistrictStatus(view.scenario, view.rainfallOverride);
+    const all = await computeAllDistrictStatus(view.scenario, view.rainfallOverride);
     const d: any = all.find((x: any) => x.district_id === district_id || x.district.toLowerCase() === String(district_id).toLowerCase());
     if (!d) return res.status(404).json({ error: 'Unknown district.' });
     const ctx = buildCitizenContext(d);
@@ -2300,7 +2307,7 @@ app.post('/api/ai/district/:districtId/explain', async (req, res) => {
   try {
     const { districtId } = req.params;
     const { language } = req.body || {};
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const aiResponse = await aiIntelligenceService.explain_district_risk(districtId, language, allDistricts);
     res.json(aiResponse);
   } catch (error: any) {
@@ -2317,7 +2324,7 @@ app.post('/api/ai/district/compare', async (req, res) => {
       return res.status(400).json({ error: 'Both "district1" and "district2" are required for comparison.' });
     }
 
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const aiResponse = await aiIntelligenceService.compare_districts(district1, district2, language, allDistricts);
     res.json(aiResponse);
   } catch (error: any) {
@@ -2330,7 +2337,7 @@ app.post('/api/ai/district/compare', async (req, res) => {
 app.post('/api/ai/forecast/explain', async (req, res) => {
   try {
     const { districtOrHorizon, language } = req.body || {};
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const aiResponse = await aiIntelligenceService.explain_forecast(districtOrHorizon || '', language, allDistricts);
     res.json(aiResponse);
   } catch (error: any) {
@@ -2344,7 +2351,7 @@ app.post('/api/ai/alert/:districtId/explain', async (req, res) => {
   try {
     const { districtId } = req.params;
     const { language } = req.body || {};
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const aiResponse = await aiIntelligenceService.explain_alert(districtId, language, allDistricts);
     res.json(aiResponse);
   } catch (error: any) {
@@ -2358,7 +2365,7 @@ app.post('/api/ai/advisory/:districtId', async (req, res) => {
   try {
     const { districtId } = req.params;
     const { language } = req.body || {};
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const aiResponse = await aiIntelligenceService.generate_public_advisory(districtId, language, allDistricts);
     res.json(aiResponse);
   } catch (error: any) {
@@ -2368,7 +2375,7 @@ app.post('/api/ai/advisory/:districtId', async (req, res) => {
 });
 
 // 7. Search Knowledge Base (RAG Endpoint)
-app.get('/api/knowledge/search', (req, res) => {
+app.get('/api/knowledge/search', async (req, res) => {
   try {
     const query = String(req.query.q || '');
     const district = req.query.district ? String(req.query.district) : undefined;
@@ -2388,7 +2395,7 @@ app.get('/api/knowledge/search', (req, res) => {
 });
 
 // 8. List Knowledge Base Documents
-app.get('/api/knowledge/docs', (req, res) => {
+app.get('/api/knowledge/docs', async (req, res) => {
   try {
     const docs = knowledgeService.getAllKnowledgeDocsSummary();
     res.json({ count: docs.length, documents: docs });
@@ -2405,7 +2412,7 @@ app.post('/api/ai/reasoning', async (req, res) => {
       return res.status(429).json({ error: 'Too many AI requests. Please slow down.' });
     }
     const { district, language } = req.body;
-    const allDistricts = computeAllDistrictStatus();
+    const allDistricts = await computeAllDistrictStatus();
     const targetDistrict = allDistricts.find(d => d.district.toLowerCase() === String(district).toLowerCase()) || allDistricts[0];
     const aiResponse = await aiIntelligenceService.explain_district_risk(targetDistrict.district, language, allDistricts);
 
@@ -2432,7 +2439,7 @@ app.post('/api/ai/reasoning', async (req, res) => {
 // ==========================================
 
 // 1. Get All Registered Data Sources
-app.get('/api/data/sources', (req, res) => {
+app.get('/api/data/sources', async (req, res) => {
   try {
     const sources = centralDataCoordinator.getAllSources();
     res.json({
@@ -2447,7 +2454,7 @@ app.get('/api/data/sources', (req, res) => {
 });
 
 // 2. Get Central System & Source Health Assessment
-app.get('/api/data/health', (req, res) => {
+app.get('/api/data/health', async (req, res) => {
   try {
     const health = centralDataCoordinator.getSystemHealth();
     res.json(health);
@@ -2458,7 +2465,7 @@ app.get('/api/data/health', (req, res) => {
 });
 
 // 3. Get / Set System Active Operational Data Mode
-app.get('/api/data/mode', (req, res) => {
+app.get('/api/data/mode', async (req, res) => {
   res.json({
     active_mode: centralDataCoordinator.getActiveMode(),
     available_modes: ['SIMULATION', 'PROTOTYPE', 'LIVE', 'IOT', 'HISTORICAL', 'OFFLINE'],
@@ -2466,7 +2473,7 @@ app.get('/api/data/mode', (req, res) => {
   });
 });
 
-app.post('/api/data/mode', requireAuth, requireRole('ADMIN'), (req, res) => {
+app.post('/api/data/mode', requireAuth, requireRole('ADMIN'), async (req, res) => {
   try {
     const { mode } = req.body;
     const allowed = ['SIMULATION', 'PROTOTYPE', 'LIVE', 'IOT', 'HISTORICAL', 'OFFLINE'];
@@ -2477,7 +2484,7 @@ app.post('/api/data/mode', requireAuth, requireRole('ADMIN'), (req, res) => {
     }
 
     centralDataCoordinator.setActiveMode(mode);
-    const updatedDistricts = computeAllDistrictStatus();
+    const updatedDistricts = await computeAllDistrictStatus();
 
     res.json({
       success: true,
@@ -2491,7 +2498,7 @@ app.post('/api/data/mode', requireAuth, requireRole('ADMIN'), (req, res) => {
 });
 
 // 4. Ingest IoT Telemetry Reading (Compatible with REST & ESP32 HTTP POST)
-app.post('/api/iot/reading', requireAuth, requireRole('ADMIN'), (req, res) => {
+app.post('/api/iot/reading', requireAuth, requireRole('ADMIN'), async (req, res) => {
   try {
     const result = centralDataCoordinator.ingestReading(req.body);
     if (!result.success) {
@@ -2515,7 +2522,7 @@ app.post('/api/iot/reading', requireAuth, requireRole('ADMIN'), (req, res) => {
 });
 
 // 5. Batch Ingest Generic Sensor Telemetry
-app.post('/api/data/ingest', requireAuth, requireRole('ADMIN'), (req, res) => {
+app.post('/api/data/ingest', requireAuth, requireRole('ADMIN'), async (req, res) => {
   try {
     const { readings } = req.body;
     if (!Array.isArray(readings)) {
@@ -2554,7 +2561,7 @@ app.post('/api/data/ingest', requireAuth, requireRole('ADMIN'), (req, res) => {
 });
 
 // 6. Get All IoT Devices (with optional filtering)
-app.get('/api/iot/devices', (req, res) => {
+app.get('/api/iot/devices', async (req, res) => {
   try {
     let devices = iotDeviceRegistry.getAllDevices();
     const { district, type, status, mode } = req.query;
@@ -2587,7 +2594,7 @@ app.get('/api/iot/devices', (req, res) => {
 });
 
 // 7. Get Device Detail & History by ID
-app.get('/api/iot/devices/:deviceId', (req, res) => {
+app.get('/api/iot/devices/:deviceId', async (req, res) => {
   try {
     const { deviceId } = req.params;
     const device = iotDeviceRegistry.getDeviceById(deviceId);
@@ -2608,7 +2615,7 @@ app.get('/api/iot/devices/:deviceId', (req, res) => {
 });
 
 // 8. Get IoT Monitoring Breakdown for District Detail Inspector
-app.get('/api/iot/district/:districtId', (req, res) => {
+app.get('/api/iot/district/:districtId', async (req, res) => {
   try {
     const { districtId } = req.params;
     const breakdown = centralDataCoordinator.getDistrictMonitoringSources(districtId);
@@ -2620,7 +2627,7 @@ app.get('/api/iot/district/:districtId', (req, res) => {
 });
 
 // 9. Overall IoT Telemetry Statistics
-app.get('/api/iot/stats', (req, res) => {
+app.get('/api/iot/stats', async (req, res) => {
   try {
     const devices = iotDeviceRegistry.getAllDevices();
     const online = devices.filter(d => d.status === 'ONLINE').length;
@@ -2654,7 +2661,7 @@ app.get('/api/iot/stats', (req, res) => {
 });
 
 // 10. Phase H Transition & Demonstration Sequence
-app.get('/api/iot/demonstration-sequence', (req, res) => {
+app.get('/api/iot/demonstration-sequence', async (req, res) => {
   res.json({
     title: 'NeerDrishti Phase H: Simulation to Prototype IoT Transition Sequence',
     steps: [
@@ -2718,7 +2725,7 @@ app.post('/api/rainfall/refresh', requireAuth, requireRole('ADMIN'), async (req,
   try {
     const districts = loadDistrictMetadata();
     const result = await openMeteoService.refreshAllDistricts(districts);
-    const updatedDistricts = computeAllDistrictStatus();
+    const updatedDistricts = await computeAllDistrictStatus();
 
     res.json({
       success: true,
@@ -2736,11 +2743,11 @@ app.post('/api/rainfall/refresh', requireAuth, requireRole('ADMIN'), async (req,
 });
 
 // 13. Notifications Dispatch & History Ledger Endpoints
-app.get('/api/notifications', requireAuth, requireRole('ADMIN'), (req, res) => {
+app.get('/api/notifications', requireAuth, requireRole('ADMIN'), async (req, res) => {
   try {
     const limit = req.query.limit ? Number(req.query.limit) : 50;
     const districtId = req.query.district ? String(req.query.district) : undefined;
-    const history = notificationService.getHistory(limit, districtId);
+    const history = await notificationService.getHistory(limit, districtId);
     res.json({ count: history.length, notifications: history });
   } catch (error: any) {
     console.error('Error retrieving notifications:', error);
@@ -2748,14 +2755,14 @@ app.get('/api/notifications', requireAuth, requireRole('ADMIN'), (req, res) => {
   }
 });
 
-app.post('/api/notifications/dispatch', requireAuth, requireRole('ADMIN'), (req, res) => {
+app.post('/api/notifications/dispatch', requireAuth, requireRole('ADMIN'), async (req, res) => {
   try {
     const { districtId, districtName, alertLevel, channel, title, message, recommendedAction, signalsTriggered, recipientGroup } = req.body;
     if (!districtId || !districtName || !alertLevel || !title || !message) {
       return res.status(400).json({ error: 'Missing required notification fields: districtId, districtName, alertLevel, title, message.' });
     }
 
-    const notif = notificationService.dispatchNotification({
+    const notif = await notificationService.dispatchNotification({
       districtId,
       districtName,
       alertLevel,
@@ -2829,27 +2836,27 @@ app.post('/api/notifications/dry-run', requireAuth, requireRole('ADMIN'), async 
 // ==========================================
 // NOTIFICATION SIMULATOR (DRY-RUN ONLY, ADMIN). Never calls a messaging provider.
 // ==========================================
-function resolveSimulationDistrict(req: express.Request, districtId: unknown) {
+async function resolveSimulationDistrict(req: express.Request, districtId: unknown) {
   const view = getScenarioViewOverrides(req);
-  const all = computeAllDistrictStatus(view.scenario, view.rainfallOverride);
+  const all = await computeAllDistrictStatus(view.scenario, view.rainfallOverride);
   return all.find((x: any) => x.district_id === districtId) as any;
 }
 
-function parseSimulationInput(req: express.Request) {
+async function parseSimulationInput(req: express.Request) {
   const { district_id, severity, language, channel } = req.body || {};
   if (typeof district_id !== 'string' || !district_id) return { error: 'district_id is required.' } as const;
   if (!(['en', 'te', 'hi'] as const).includes(language)) return { error: 'language must be en, te or hi.' } as const;
   if (!(['WHATSAPP', 'SMS', 'EMAIL'] as const).includes(channel)) return { error: 'channel must be WHATSAPP, SMS or EMAIL.' } as const;
   if (severity !== undefined && !SEVERITIES.includes(severity)) return { error: `severity must be one of ${SEVERITIES.join(', ')}.` } as const;
-  const d = resolveSimulationDistrict(req, district_id);
+  const d = await resolveSimulationDistrict(req, district_id);
   if (!d) return { error: 'Unknown district.', status: 404 } as const;
   const actual: Severity = severityFromRisk(d.risk_category);
   const used: Severity = severity ?? actual;
   return { d, language, channel: channel as Channel, actual, used };
 }
 
-app.post('/api/notifications/preview', requireAuth, requireRole('ADMIN'), (req, res) => {
-  const p = parseSimulationInput(req);
+app.post('/api/notifications/preview', requireAuth, requireRole('ADMIN'), async (req, res) => {
+  const p = await parseSimulationInput(req);
   if ('error' in p) return res.status(('status' in p && p.status) || 400).json({ error: p.error });
   const preview = buildPreview({ districtName: p.d.district, severity: p.used, language: p.language, channel: p.channel });
   res.json({
@@ -2862,7 +2869,7 @@ app.post('/api/notifications/preview', requireAuth, requireRole('ADMIN'), (req, 
   });
 });
 
-app.post('/api/notifications/simulate', requireAuth, requireRole('ADMIN'), (req, res) => {
+app.post('/api/notifications/simulate', requireAuth, requireRole('ADMIN'), async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   if (process.env.NOTIFICATION_DRY_RUN === 'false' || process.env.NOTIFICATION_LIVE_SEND_ENABLED === 'true') {
     return res.status(409).json({ error: 'Simulation endpoint refuses to run unless NOTIFICATION_DRY_RUN is true and live sending is disabled.' });
@@ -2871,13 +2878,13 @@ app.post('/api/notifications/simulate', requireAuth, requireRole('ADMIN'), (req,
   if (!limit.allowed) { res.setHeader('Retry-After', String(limit.retryAfterSeconds)); return res.status(429).json({ error: 'Too many simulations. Please wait.' }); }
   const key = String(req.get('Idempotency-Key') || req.body?.idempotency_key || '').trim();
   if (!/^[A-Za-z0-9_-]{8,80}$/.test(key)) return res.status(400).json({ error: 'An Idempotency-Key (8-80 chars: letters, digits, - or _) is required.' });
-  const p = parseSimulationInput(req);
+  const p = await parseSimulationInput(req);
   if ('error' in p) return res.status(('status' in p && p.status) || 400).json({ error: p.error });
   const contact = validateContact(p.channel, req.body?.contact);
   if (!contact.ok) return res.status(400).json({ error: contact.error });
 
-  const db = getDb();
-  const existing = db.prepare('SELECT response_json FROM notification_simulation_keys WHERE idempotency_key = ?').get(key) as any;
+  const db = getMongoDb();
+  const existing = await db.collection('notification_simulation_keys').findOne({ idempotency_key: key });
   if (existing) return res.status(200).json({ ...JSON.parse(existing.response_json), replayed: true });
 
   const preview = buildPreview({ districtName: p.d.district, severity: p.used, language: p.language, channel: p.channel });
@@ -2893,17 +2900,31 @@ app.post('/api/notifications/simulate', requireAuth, requireRole('ADMIN'), (req,
     preview,
   };
   try {
-    db.exec('BEGIN');
-    db.prepare('INSERT INTO notification_simulation_keys(idempotency_key, simulation_id, user_id, created_at, response_json) VALUES (?,?,?,?,?)')
-      .run(key, simulationId, authReq.auth!.user.id, createdAt, JSON.stringify(response));
-    db.prepare(`INSERT INTO notification_history (id, district_id, district_name, alert_level, channel, title, message, recommended_action, signals_triggered, status, recipient_group, timestamp, is_prototype, metadata)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(simulationId, p.d.district_id, p.d.district, p.used, p.channel, preview.subject || `NeerDrishti simulation: ${p.d.district}`, preview.body, null, null, 'DRY_RUN', 'DEMO_CONTACT', createdAt, 1,
-           JSON.stringify({ simulation: true, language: p.language, actual_severity: p.actual, severity_override: p.used !== p.actual, contact_masked: response.contact_masked }));
-    db.exec('COMMIT');
+    await db.collection('notification_simulation_keys').insertOne({
+      idempotency_key: key,
+      simulation_id: simulationId,
+      user_id: authReq.auth!.user.id,
+      created_at: createdAt,
+      response_json: JSON.stringify(response),
+    });
+    await db.collection('notification_history').insertOne({
+      id: simulationId,
+      district_id: p.d.district_id,
+      district_name: p.d.district,
+      alert_level: p.used,
+      channel: p.channel,
+      title: preview.subject || `NeerDrishti simulation: ${p.d.district}`,
+      message: preview.body,
+      recommended_action: null,
+      signals_triggered: null,
+      status: 'DRY_RUN',
+      recipient_group: 'DEMO_CONTACT',
+      timestamp: createdAt,
+      is_prototype: 1,
+      metadata: JSON.stringify({ simulation: true, language: p.language, actual_severity: p.actual, severity_override: p.used !== p.actual, contact_masked: response.contact_masked }),
+    });
   } catch (err: any) {
-    try { db.exec('ROLLBACK'); } catch { /* ignore */ }
-    const again = db.prepare('SELECT response_json FROM notification_simulation_keys WHERE idempotency_key = ?').get(key) as any;
+    const again = await db.collection('notification_simulation_keys').findOne({ idempotency_key: key });
     if (again) return res.status(200).json({ ...JSON.parse(again.response_json), replayed: true });
     console.error('Simulation failed:', err);
     return res.status(500).json({ error: 'Could not record the simulation.' });
@@ -2911,15 +2932,15 @@ app.post('/api/notifications/simulate', requireAuth, requireRole('ADMIN'), (req,
   res.status(201).json({ ...response, replayed: false });
 });
 
-app.get('/api/notifications/simulations', requireAuth, requireRole('ADMIN'), (req, res) => {
+app.get('/api/notifications/simulations', requireAuth, requireRole('ADMIN'), async (req, res) => {
   const n = Math.min(100, Math.max(1, parseInt(String(req.query.limit || '25'), 10) || 25));
-  const rows = getDb().prepare("SELECT id, district_id, district_name, alert_level, channel, status, timestamp, metadata FROM notification_history WHERE id LIKE 'SIM-%' ORDER BY timestamp DESC LIMIT ?").all(n) as any[];
+  const rows = await getMongoDb().collection('notification_history').find({ id: { $regex: '^SIM-' } }, { sort: { timestamp: -1 }, limit: n }).toArray();
   res.json({ simulations: rows.map(r => ({ ...r, metadata: (() => { try { return JSON.parse(r.metadata || '{}'); } catch { return {}; } })() })) });
 });
 
-app.get('/api/notifications/stats', requireAuth, requireRole('ADMIN'), (req, res) => {
+app.get('/api/notifications/stats', requireAuth, requireRole('ADMIN'), async (req, res) => {
   try {
-    const stats = notificationService.getStats();
+    const stats = await notificationService.getStats();
     res.json(stats);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to retrieve notification statistics.' });
@@ -2930,9 +2951,15 @@ app.get('/api/notifications/stats', requireAuth, requireRole('ADMIN'), (req, res
 // VITE SPA MIDDLEWARE / PRODUCTION STATIC SERVE
 // ==========================================
 async function startServer() {
+  try {
+    await initDatabase();
+  } catch (err) {
+    console.error(JSON.stringify({ type: 'startup', event: 'database_init_failed', error: toSafeError(err) }));
+    process.exit(1);
+  }
   // Unknown /api routes must NEVER fall through to the SPA (index.html) or Express's default HTML 404:
   // clients call res.json() on API responses and would crash with "Unexpected token '<'".
-  app.use('/api', (req, res) => {
+  app.use('/api', async (req, res) => {
     res.status(404).json({ error: `API route not found: ${req.method} ${req.originalUrl.split('?')[0]}` });
   });
   if (RUNTIME.nodeEnv === 'development') {
@@ -2948,7 +2975,7 @@ async function startServer() {
     ];
     const distPath = candidatePaths.find(p => fs.existsSync(path.join(p, 'index.html'))) || candidatePaths[0];
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*', async (req, res) => {
       const indexPath = path.join(distPath, 'index.html');
       if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);
@@ -2968,23 +2995,25 @@ async function startServer() {
     res.status(status).type('text/plain').send(status >= 500 ? 'Internal server error' : 'Bad request');
   });
 
-  initializeAdminSetup();
+  await initializeAdminSetup();
 
   const httpServer = app.listen(PORT, '0.0.0.0', () => {
     console.log(`NeerDrishti Phase C Server listening on port ${PORT}`);
     // Start lightweight Open-Meteo live rainfall telemetry scheduled refresh
-    try {
-      const districts = loadDistrictMetadata();
-      if (districts && districts.length > 0) {
-        openMeteoService.startScheduledRefresh(districts);
+    if (process.env.NODE_ENV !== 'test' && process.env.NEERDRISHTI_DISABLE_SCHEDULED_REFRESH !== 'true') {
+      try {
+        const districts = loadDistrictMetadata();
+        if (districts && districts.length > 0) {
+          openMeteoService.startScheduledRefresh(districts);
+        }
+      } catch (err) {
+        console.error('Failed to initialize Open-Meteo live refresh on server start:', err);
       }
-    } catch (err) {
-      console.error('Failed to initialize Open-Meteo live refresh on server start:', err);
-    }
-    try {
-      imdCapService.startScheduledRefresh();
-    } catch (err) {
-      console.error('Failed to initialize official CAP refresh on server start:', err);
+      try {
+        imdCapService.startScheduledRefresh();
+      } catch (err) {
+        console.error('Failed to initialize official CAP refresh on server start:', err);
+      }
     }
   });
 
@@ -3029,4 +3058,12 @@ async function startServer() {
   });
 }
 
-startServer();
+const modulePath = typeof import.meta.url === 'string' ? fileURLToPath(import.meta.url) : undefined;
+const isMainModule = typeof require !== 'undefined' && typeof module !== 'undefined'
+  ? require.main === module
+  : Boolean(process.argv[1] && modulePath && path.resolve(process.argv[1]) === path.resolve(modulePath));
+if (isMainModule) {
+  startServer();
+}
+
+export { app, startServer };

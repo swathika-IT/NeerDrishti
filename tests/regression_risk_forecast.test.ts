@@ -51,28 +51,28 @@ test('forecast reads flood_risk_score as current risk (field contract)', () => {
   assert.equal(result.currentRiskScore, 60.0);
 });
 
-test('forecast does not treat missing legacy composite_risk_score as zero when flood_risk_score exists', () => {
+test('forecast does not treat missing legacy composite_risk_score as zero when flood_risk_score exists', async () => {
   const status = makeDistrictStatus({ flood_risk_score: 42.5, risk_category: 'MODERATE' });
-  const timeline = projectDistrictTimeline(status, {}, 'SIMULATED_FORECAST', { persistSnapshot: false });
+  const timeline = await projectDistrictTimeline(status, {}, 'SIMULATED_FORECAST', { persistSnapshot: false });
   assert.equal(timeline.currentRiskScore, 42.5);
   assert.equal(timeline.currentRiskLevel, 'MODERATE');
   assert.equal(timeline.timeline.now.riskScore, 42.5);
   assert.equal(timeline.timeline.now.riskLevel, 'MODERATE');
 });
 
-test('forecast falls back to legacy composite_risk_score when flood_risk_score is absent', () => {
+test('forecast falls back to legacy composite_risk_score when flood_risk_score is absent', async () => {
   const status = makeDistrictStatus({ flood_risk_score: undefined, risk_category: undefined });
   delete (status as any).flood_risk_score;
   (status as any).composite_risk_score = 33.0;
   (status as any).risk_level = 'MODERATE';
-  const timeline = projectDistrictTimeline(status, {}, 'SIMULATED_FORECAST');
+  const timeline = await projectDistrictTimeline(status, {}, 'SIMULATED_FORECAST');
   assert.equal(timeline.currentRiskScore, 33.0);
   assert.equal(timeline.currentRiskLevel, 'MODERATE');
 });
 
-test('timeline reading path writes no forecast snapshot by default', () => {
+test('timeline reading path writes no forecast snapshot by default', async () => {
   const status = makeDistrictStatus();
-  assert.doesNotThrow(() => projectDistrictTimeline(status, {}, 'SIMULATED_FORECAST'));
+  await assert.doesNotReject(() => projectDistrictTimeline(status, {}, 'SIMULATED_FORECAST'));
 });
 
 test('basin routing consumes flood_risk_score of upstream district (TEL-NIR -> TEL-MNC)', () => {

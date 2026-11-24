@@ -1,12 +1,10 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
+import { getMongoTestUri, connectMongoTest, dropMongoTestDb, closeMongoTest, assertSafeMongoTestUri } from './helpers/mongo_test_harness';
 
-const PROJECT_ROOT = process.cwd();
-const SOURCE_DB = path.join(PROJECT_ROOT, 'data', 'neerdrishti.db');
-const TEST_DB = path.join(os.tmpdir(), `neerdrishti-om-test-${Date.now()}.db`);
+const MONGO_URI = getMongoTestUri();
+assertSafeMongoTestUri(MONGO_URI);
+let mongo: any;
 
 const mk = (id: string, name: string, lat: number, lng: number, zone: string) => ({
   district_id: id,
@@ -101,8 +99,11 @@ let openMeteoService: any;
 let DATA_SOURCES: any;
 
 before(async () => {
-  fs.copyFileSync(SOURCE_DB, TEST_DB);
-  process.env.DATABASE_PATH = TEST_DB;
+  process.env.MONGODB_URI = MONGO_URI;
+mongo = await connectMongoTest(MONGO_URI);
+await mongo.db.dropDatabase();
+const { initDatabase } = await import('../src/db/mongo');
+await initDatabase();
   process.env.OPEN_METEO_CACHE_TTL_MS = '0';
   process.env.OPEN_METEO_TIMEOUT_MS = '300';
   process.env.OPEN_METEO_RETRIES = '2';
@@ -114,11 +115,9 @@ before(async () => {
   DATA_SOURCES = cfg.DATA_SOURCES;
 });
 
-after(() => {
+after(async () => {
   globalThis.fetch = originalFetch;
-  for (const f of [TEST_DB, `${TEST_DB}-wal`, `${TEST_DB}-shm`]) {
-    try { fs.unlinkSync(f); } catch { /* ignore */ }
-  }
+  if (mongo) { await dropMongoTestDb(mongo); await closeMongoTest(mongo); }
 });
 
 test('successful fetch ingests a LIVE signal into the signal pipeline', async () => {
@@ -133,15 +132,13 @@ test('successful fetch ingests a LIVE signal into the signal pipeline', async ()
 });
 
 test('duplicate suppression: re-refresh does not re-ingest within the window', async () => {
-  const { DatabaseSync } = await import('node:sqlite');
-  const db = new DatabaseSync(TEST_DB);
-  const beforeCount = db.prepare('select count(*) c from external_signals').get() as any;
+    const beforeCount = await mongo.db.collection('external_signals').countDocuments();
   fetchBehavior = 'respond';
   fetchCalls = [];
   mockHandler = () => ({ status: 200, body: hourlyPayload(4) });
   const result = await openMeteoService.refreshAllDistricts(SET_A);
-  const afterCount = db.prepare('select count(*) c from external_signals').get() as any;
-  assert.equal(afterCount.c, beforeCount.c);
+  const afterCount = await mongo.db.collection('external_signals').countDocuments();
+  assert.equal(afterCount, beforeCount);
   assert.equal(result.success_count, 3);
 });
 
@@ -204,7 +201,7 @@ test('network failure surfaces as failed refresh without fabricating LIVE data',
 
 test('stale observations are stored with EXPIRED freshness and never as fresh LIVE', async () => {
   const mod = await import('../src/services/rainfall_service');
-  const stale = mod.rainfallService.ingestObservation({
+  const stale = await mod.rainfallService.ingestObservation({
     rawDistrict: 'Hyderabad',
     rainfall_mm: 50,
     unit: 'mm',
@@ -214,8 +211,8 @@ test('stale observations are stored with EXPIRED freshness and never as fresh LI
     timestamp: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString(),
   } as any);
   assert.equal(stale.success, true);
-  assert.equal(stale.signal.freshness, 'EXPIRED');
-  assert.notEqual(stale.signal.freshness, 'FRESH');
+  assert.equal(stale.signal!.freshness, 'EXPIRED');
+  assert.notEqual(stale.signal!.freshness, 'FRESH');
 });
 
 test('unconnected sources remain clearly marked offline', async () => {

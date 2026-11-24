@@ -74,9 +74,9 @@ test('simulated forecasts cannot claim HIGH confidence; UNAVAILABLE is limited',
   assert.ok(['LOW', 'LIMITED'].includes(unavailable.level));
 });
 
-test('forecast timestamps are ISO and validUntil honours the horizon', () => {
+test('forecast timestamps are ISO and validUntil honours the horizon', async () => {
   const status = makeStatus();
-  const timeline = projectDistrictTimeline(status, {}, 'SIMULATED_FORECAST');
+  const timeline = await projectDistrictTimeline(status, {}, 'SIMULATED_FORECAST');
   for (const horizon of ['h3', 'h6', 'h12', 'h24'] as const) {
     const point = timeline.timeline[horizon];
     const gen = new Date(point.generatedAt).getTime();
@@ -88,18 +88,18 @@ test('forecast timestamps are ISO and validUntil honours the horizon', () => {
   assert.ok(!Number.isNaN(new Date(timeline.generatedAt).getTime()));
 });
 
-test('default forecast data mode is SIMULATED_FORECAST, never silently LIVE', () => {
+test('default forecast data mode is SIMULATED_FORECAST, never silently LIVE', async () => {
   const status = makeStatus({ rainfall_data_mode: 'LIVE', rainfall_freshness: 'FRESH', rainfall_confidence: 0.9 });
-  const timeline = projectDistrictTimeline(status, {}, 'SIMULATED_FORECAST');
+  const timeline = await projectDistrictTimeline(status, {}, 'SIMULATED_FORECAST');
   assert.equal(timeline.dataMode, 'SIMULATED_FORECAST');
   for (const horizon of ['h3', 'h6', 'h12', 'h24'] as const) {
     assert.equal(timeline.timeline[horizon].forecastDataMode, 'SIMULATED_FORECAST');
   }
 });
 
-test('timeline h6 point is consistent with direct projection', () => {
+test('timeline h6 point is consistent with direct projection', async () => {
   const status = makeStatus();
-  const timeline = projectDistrictTimeline(status, {}, 'SIMULATED_FORECAST');
+  const timeline = await projectDistrictTimeline(status, {}, 'SIMULATED_FORECAST');
   const direct = projectDistrictRisk(status, 6, undefined, 'SIMULATED_FORECAST', {});
   assert.equal(timeline.timeline.h6.projectedRiskScore, direct.projectedRiskScore);
   assert.equal(timeline.timeline.h6.currentRiskScore, direct.currentRiskScore);
@@ -114,9 +114,9 @@ test('basin influence contribution is capped and non-negative', () => {
   assert.ok(point.basinInfluenceContribution >= 0);
 });
 
-test('forecast disclaimer is present and states not an official warning', () => {
+test('forecast disclaimer is present and states not an official warning', async () => {
   const status = makeStatus();
-  const timeline = projectDistrictTimeline(status, {}, 'SIMULATED_FORECAST');
+  const timeline = await projectDistrictTimeline(status, {}, 'SIMULATED_FORECAST');
   assert.match(timeline.disclaimer, /not an official/i);
 });
 

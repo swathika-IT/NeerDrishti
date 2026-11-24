@@ -234,3 +234,39 @@ export function parseHistoricalRainfallCsv(
     },
   };
 }
+
+import { getDb } from '../../db/mongo';
+
+export interface HistoricalSignalRow {
+  district_id: string;
+  source_name: string;
+  source_type: string;
+  signal_type: string;
+  value: number;
+  unit: string;
+  data_mode: string;
+  freshness: string;
+  confidence: number;
+  is_valid: number;
+  recorded_at: string;
+  metadata: Record<string, any>;
+}
+
+export async function insertHistoricalSignalsBatch(rows: HistoricalSignalRow[], ingestedAt?: string): Promise<number> {
+  if (rows.length === 0) return 0;
+  const db = getDb();
+  const docs = rows.map(r => ({ ...r, ingested_at: ingestedAt || new Date().toISOString() }));
+  const res = await db.collection('external_signals').insertMany(docs, { ordered: false });
+  return res.insertedCount || 0;
+}
+
+export async function getExistingSignalDateKeys(sourceName: string, signalType: string = 'rainfall'): Promise<Set<string>> {
+  const db = getDb();
+  const rows = await db.collection('external_signals').find({ source_name: sourceName, signal_type: signalType }, { projection: { district_id: 1, recorded_at: 1 } }).toArray();
+  const keys = new Set<string>();
+  for (const r of rows) {
+    const date = String(r.recorded_at || '').slice(0, 10);
+    if (r.district_id && date) keys.add(`${r.district_id}|${date}`);
+  }
+  return keys;
+}

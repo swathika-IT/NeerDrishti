@@ -66,14 +66,42 @@ class MockLogResponse extends EventEmitter {
   }
 }
 
-test('environment defaults are valid and safe', () => {
+test('environment defaults fail fast without MONGODB_URI', () => {
   const result = validateEnvironment({});
-  assert.equal(result.valid, true);
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some(error => error.key === 'MONGODB_URI'));
   assert.equal(result.config.port, 3000);
   assert.equal(result.config.requestLogging.enabled, true);
   assert.equal(result.config.security.cspEnabled, true);
   assert.equal(result.config.security.hstsEnabled, false);
   assert.deepEqual(result.config.cors.allowedOrigins, []);
+});
+
+test('MONGODB_URI accepts Atlas credentials', () => {
+  const result = validateEnvironment({ MONGODB_URI: 'mongodb+srv://app_user:p%40ss@cluster.example.mongodb.net/neerdrishti_staging?retryWrites=true&w=majority' });
+  assert.equal(result.valid, true);
+});
+
+test('MONGODB_URI accepts encoded special characters', () => {
+  const result = validateEnvironment({ MONGODB_URI: 'mongodb://user:p%2Fss@localhost:27017/neerdrishti_staging' });
+  assert.equal(result.valid, true);
+});
+
+test('MONGODB_URI rejects missing database name', () => {
+  const result = validateEnvironment({ MONGODB_URI: 'mongodb+srv://app_user:secret@cluster.example.mongodb.net/' });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some(error => error.key === 'MONGODB_URI'));
+});
+
+test('MONGODB_URI rejects malformed URI', () => {
+  const result = validateEnvironment({ MONGODB_URI: 'not-a-uri' });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some(error => error.key === 'MONGODB_URI'));
+});
+
+test('MONGODB_URI accepts SRV and replica-set formats', () => {
+  assert.equal(validateEnvironment({ MONGODB_URI: 'mongodb+srv://user:pass@cluster0.example.mongodb.net/neerdrishti_staging?retryWrites=true&w=majority' }).valid, true);
+  assert.equal(validateEnvironment({ MONGODB_URI: 'mongodb://host1:27017,host2:27017/neerdrishti_staging?replicaSet=rs0' }).valid, true);
 });
 
 test('environment validation rejects invalid numbers, booleans, and URLs without exposing values', () => {

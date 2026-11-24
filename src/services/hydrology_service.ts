@@ -19,7 +19,7 @@ import {
   getStationSignalHistory,
   insertExternalSignal,
   detectDuplicateSignal
-} from '../db/sqlite';
+} from '../db/mongo';
 import { normalizeDistrict } from './district_normalizer';
 import { evaluateFreshness, validateSignal } from './signal_validator';
 import { DATA_SOURCES } from '../config/data_sources';
@@ -47,13 +47,13 @@ let cachedStations: HydrologicalStation[] | null = null;
 /**
  * Loads the hydrological stations from disk or database.
  */
-export function loadHydrologicalStations(): HydrologicalStation[] {
+export async function loadHydrologicalStations(): Promise<HydrologicalStation[]> {
   if (cachedStations && cachedStations.length > 0) {
     return cachedStations;
   }
 
   try {
-    const dbStations = getDbStations();
+    const dbStations = await getDbStations();
     if (dbStations && dbStations.length > 0) {
       cachedStations = dbStations.map((s) => ({
         station_id: s.station_id,
@@ -89,8 +89,8 @@ export function loadHydrologicalStations(): HydrologicalStation[] {
 /**
  * Gets stations for a specific district or all districts.
  */
-export function getHydrologicalStations(districtId?: string): HydrologicalStation[] {
-  const all = loadHydrologicalStations();
+export async function getHydrologicalStations(districtId?: string): Promise<HydrologicalStation[]> {
+  const all = await loadHydrologicalStations();
   if (!districtId) return all;
   const norm = normalizeDistrict(districtId);
   const targetId = norm.resolved ? norm.districtId : districtId.toLowerCase().trim();
@@ -100,21 +100,21 @@ export function getHydrologicalStations(districtId?: string): HydrologicalStatio
 /**
  * Gets station by ID.
  */
-export function getStationById(stationId: string): HydrologicalStation | null {
-  const all = loadHydrologicalStations();
+export async function getStationById(stationId: string): Promise<HydrologicalStation | null> {
+  const all = await loadHydrologicalStations();
   const stn = all.find((s) => s.station_id.toLowerCase() === stationId.toLowerCase());
   return stn || null;
 }
 
 /**
- * Ingests and persists a hydrological observation (river level, reservoir storage, dam discharge) into SQLite ledger.
+ * Ingests and persists a hydrological observation (river level, reservoir storage, dam discharge) into MongoDB ledger.
  */
-export function ingestHydrologicalObservation(raw: RawHydrologicalObservation): {
+export async function ingestHydrologicalObservation(raw: RawHydrologicalObservation): Promise<{
   success: boolean;
   observation?: HydrologicalObservation;
   error?: string;
-} {
-  const stn = getStationById(raw.stationId);
+}> {
+  const stn = await getStationById(raw.stationId);
   const targetDistrict = raw.rawDistrict || (stn ? stn.district_id : undefined);
 
   if (!targetDistrict) {
@@ -165,11 +165,11 @@ export function ingestHydrologicalObservation(raw: RawHydrologicalObservation): 
   }
 
   // Duplicate detection
-  const isDup = detectDuplicateSignal(districtId, sourceName, signalType, recordedAt);
+  const isDup = await detectDuplicateSignal(districtId, sourceName, signalType, recordedAt);
   let signalId: number | undefined;
 
   if (!isDup) {
-    signalId = insertExternalSignal({
+    signalId = await insertExternalSignal({
       district_id: districtId,
       source_name: sourceName,
       source_type: sourceType,
@@ -428,16 +428,16 @@ function buildSimulatedStationObservation(
 /**
  * Computes district-level hydrological summary with explainability and transparent fallback.
  */
-export function getDistrictHydrologicalSummary(
+export async function getDistrictHydrologicalSummary(
   districtId: string,
   scenarioName: string = 'Heavy Rainfall'
-): HydrologicalDistrictSummary {
+): Promise<HydrologicalDistrictSummary> {
   const norm = normalizeDistrict(districtId);
   const canonId = norm.resolved ? norm.districtId : districtId.toLowerCase().trim();
   const canonName = norm.canonicalName || districtId;
 
-  const stations = getHydrologicalStations(canonId);
-  const dbSignals = getLatestHydrologicalSignals(canonId);
+  const stations = await getHydrologicalStations(canonId);
+  const dbSignals = await getLatestHydrologicalSignals(canonId);
 
   const observations: HydrologicalObservation[] = [];
   const allAnomalies: HydrologicalAnomaly[] = [];
@@ -457,7 +457,7 @@ export function getDistrictHydrologicalSummary(
         const status = classifyHydrologicalStatus(latestDb.value, warn, dang);
         
         // Check trend from history
-        const history = getStationSignalHistory(canonId, latestDb.signal_type, stn.station_id, 5);
+        const history = await getStationSignalHistory(canonId, latestDb.signal_type, stn.station_id, 5);
         const { trend } = detectHydrologicalTrend(history);
 
         const obs: HydrologicalObservation = {
@@ -593,9 +593,9 @@ export function getDistrictHydrologicalSummary(
 /**
  * Returns summaries for all 33 Telangana districts.
  */
-export function getAllDistrictsHydrologicalSummaries(scenarioName: string = 'Heavy Rainfall'): Record<string, HydrologicalDistrictSummary> {
+export async function getAllDistrictsHydrologicalSummaries(scenarioName: string = 'Heavy Rainfall'): Promise<Record<string, HydrologicalDistrictSummary>> {
   const result: Record<string, HydrologicalDistrictSummary> = {};
-  const stations = loadHydrologicalStations();
+  const stations = await loadHydrologicalStations();
   const districtIds = new Set(stations.map((s) => s.district_id));
 
   // Add Hyderabad and other core districts
@@ -606,7 +606,7 @@ export function getAllDistrictsHydrologicalSummaries(scenarioName: string = 'Hea
   districtIds.add('nirmal');
 
   for (const distId of Array.from(districtIds)) {
-    result[distId] = getDistrictHydrologicalSummary(distId, scenarioName);
+    result[distId] = await getDistrictHydrologicalSummary(distId, scenarioName);
   }
   return result;
 }

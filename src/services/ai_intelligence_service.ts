@@ -1,5 +1,6 @@
 import { DistrictStatus } from '../types';
 import { 
+  FLOOD_INTENTS,
   UserQuestionIntent, 
   IntentDetectionResult, 
   EvidencePackage, 
@@ -19,6 +20,12 @@ import { getUpstreamConnections, getDownstreamConnections } from './basin_routin
 import { centralDataCoordinator } from './data/data_connector';
 import { iotDeviceRegistry } from './data/iot_device_registry';
 import { callLlamaChat, getLlamaConfig, extractJsonFromText } from './llama_client';
+
+export interface ChatHistoryTurn {
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt?: string;
+}
 
 export class AIIntelligenceService {
   constructor() {}
@@ -53,7 +60,7 @@ export class AIIntelligenceService {
     }
 
     // Default primary district if none found but needed
-    if (!primaryDistrict && allDistricts.length > 0) {
+    if (!primaryDistrict && allDistricts.length > 0 && FLOOD_INTENTS.has(detectedIntent.intent)) {
       // Pick highest risk district as default subject
       primaryDistrict = allDistricts.reduce((max, d) => (d.flood_risk_score > max.flood_risk_score ? d : max), allDistricts[0]);
     }
@@ -300,7 +307,8 @@ export class AIIntelligenceService {
     query: string,
     language?: 'en' | 'te' | 'hi',
     districtContext?: string,
-    allDistricts: DistrictStatus[] = []
+    allDistricts: DistrictStatus[] = [],
+    history: ChatHistoryTurn[] = []
   ): Promise<GroundedAIResponse> {
     const detectedIntent = intentService.detectIntent(query, districtContext);
     const targetLang = language || detectedIntent.language;
@@ -310,7 +318,7 @@ export class AIIntelligenceService {
 
     // Try Meta Llama API first
     try {
-      const llamaResponse = await this.callLlama(evidence);
+      const llamaResponse = await this.callLlama(evidence, history);
       if (llamaResponse) {
         return llamaResponse;
       }
@@ -421,26 +429,40 @@ export class AIIntelligenceService {
   /**
    * Invokes Meta Llama using OpenAI-compatible protocol with strictly grounded prompt & schema.
    */
-  private async callLlama(evidence: EvidencePackage): Promise<GroundedAIResponse | null> {
+  private async callLlama(evidence: EvidencePackage, history: ChatHistoryTurn[] = []): Promise<GroundedAIResponse | null> {
     const config = getLlamaConfig();
     const primary = evidence.primaryDistrict;
     const secondary = evidence.secondaryDistrict;
     const comparison = evidence.comparisonSummary;
     const kbText = evidence.knowledgeSnippets.map(s => `[DOC: ${s.title} (${s.category})]\n${s.content}`).join('\n\n') || 'No additional specialized documents.';
 
-    const systemPrompt = `You are the NeerDrishti Grounded AI Flood Intelligence Engine for the State of Telangana, India powered by Meta Llama.
-You provide authoritative, factual, and strictly grounded flood risk intelligence and public safety advisories across 33 Telangana districts.
+    const systemPrompt = `You are NeerDrishti AI, a friendly, professional, patient flood-intelligence assistant for Telangana, India.
+
+PERSONALITY:
+- Be welcoming, natural, concise, and easy for ordinary citizens to understand.
+- Use simple language by default; give more detail only when the user asks for it.
+- Understand informal spellings, abbreviations, and mixed English/Telugu/Hindi messages.
+- Reply in the same language the user used. If the user writes Telugu, reply in Telugu. If the user writes Hindi, reply in Hindi. If the user mixes languages, reply naturally in the dominant language.
+- Never claim you were trained or fine-tuned unless explicitly stated by the system.
+- Stay focused on NeerDrishti, flood risk, rainfall, alerts, citizen reports, and safety guidance.
 
 CRITICAL GROUNDING RULES:
-1. Use ONLY the provided evidence. DO NOT invent rainfall amounts, water gauge levels, casualties, official evacuation orders, or government statements.
-2. If evidence indicates simulation or prototype, explicitly identify this data provenance.
-3. If data or knowledge is unavailable or limited, explicitly state: "Data is currently unavailable in the NeerDrishti system" or "Verified information is currently limited for this district."
-4. If the user asks in Telugu or requests Telugu, ensure accurate, respectful, and natural Telugu translation (తెలుగు సలహా). If the user asks in Hindi or requests Hindi, ensure accurate, authoritative Hindi translation (हिन्दी सलाह). Always provide both teluguSummary and hindiSummary in the output JSON.
-5. Output clean, valid JSON matching the exact JSON schema provided below.`;
+1. Use ONLY the provided evidence for factual flood information. DO NOT invent rainfall amounts, water gauge levels, casualties, official evacuation orders, or government statements.
+2. Clearly distinguish simulated or prototype information from verified live observations. If evidence indicates simulation or prototype, explicitly identify this data provenance.
+3. If data or knowledge is unavailable or limited, explicitly say so in simple language.
+4. Include the district name and timestamp whenever they are available.
+5. Never present simulated data as real-time observations and never invent an official alert.
+6. Always provide both teluguSummary and hindiSummary in the output JSON.
+7. Output clean, valid JSON matching the exact JSON schema provided below.`;
+
+    const historyText = history.slice(-6).map(t => `${t.role === 'user' ? 'USER' : 'ASSISTANT'}: ${t.content.slice(0, 500)}`).join('\n');
 
     const promptBody = `USER QUERY: "${evidence.query}"
 INTENT: ${evidence.intent}
 LANGUAGE: ${evidence.language}
+
+RECENT CONVERSATION (use only to resolve follow-up references such as "it" or "that district"):
+${historyText || 'No prior conversation.'}
 
 STRUCTURED EVIDENCE:
 ${primary ? `

@@ -8,6 +8,7 @@ import {
   type RequestLoggingConfig,
   type SecurityHeadersConfig,
 } from './security';
+import { validateMongoConnectionString } from './mongo_uri';
 
 export type RuntimeNodeEnv = 'development' | 'test' | 'production';
 
@@ -19,7 +20,7 @@ export interface EnvValidationIssue {
 export interface RuntimeConfig {
   nodeEnv: RuntimeNodeEnv;
   port: number;
-  databasePath: string;
+  mongoUri: string;
   shutdownTimeoutMs: number;
   cors: CorsConfig;
   security: SecurityHeadersConfig;
@@ -145,6 +146,18 @@ export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): EnvVa
     errors.push({ key: 'CORS_ALLOWED_ORIGINS', message });
   }
 
+  if (!hasValue(env.MONGODB_URI)) {
+    errors.push({
+      key: 'MONGODB_URI',
+      message: 'MONGODB_URI (MongoDB staging database connection string) is required.',
+    });
+  } else {
+    const mongoCheck = validateMongoConnectionString(String(env.MONGODB_URI));
+    if (!mongoCheck.ok) {
+      errors.push({ key: 'MONGODB_URI', message: mongoCheck.reason || 'MONGODB_URI is invalid.' });
+    }
+  }
+
   if (parseBooleanValue(env.NOTIFICATION_LIVE_SEND_ENABLED) === true) {
     errors.push({
       key: 'NOTIFICATION_LIVE_SEND_ENABLED',
@@ -202,7 +215,7 @@ export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): EnvVa
     config: {
       nodeEnv,
       port: Number.isInteger(port) ? port : 3000,
-      databasePath: hasValue(env.DATABASE_PATH) ? String(env.DATABASE_PATH) : 'data/neerdrishti.db',
+      mongoUri: hasValue(env.MONGODB_URI) ? String(env.MONGODB_URI) : '',
       shutdownTimeoutMs: Number.isInteger(shutdownTimeoutMs) ? shutdownTimeoutMs : 5000,
       cors: buildCorsConfig(env),
       security: buildSecurityHeadersConfig(env, nodeEnv),

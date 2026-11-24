@@ -1,31 +1,29 @@
 # Render Blueprint for NeerDrishti.
-# NOTE: persistent disks require a paid instance type (starter or above).
-# On the free plan the SQLite file is ephemeral and resets on every deploy/restart.
+# The application runtime uses MongoDB. No persistent disk is required.
 services:
   - type: web
     name: neerdrishti
     runtime: node
-    plan: starter
-    branch: main
+    plan: free
+    region: singapore
+    branch: sqlite-to-mongo-staging
     buildCommand: npm ci --include=dev && npm run build
-    startCommand: npm start            # bootstraps schema + migrations, then starts the server
+    startCommand: npm start            # verifies MongoDB, then starts the server
     healthCheckPath: /api/health/ready
-    disk:
-      name: neerdrishti-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: NODE_VERSION
-        value: "22"                    # node:sqlite needs Node >= 22.5
+        value: "22"
       - key: NODE_ENV
         value: production
       - key: COOKIE_SECURE
         value: "true"
-      - key: DATABASE_PATH
-        value: /var/data/neerdrishti.db
-      - key: NEERDRISHTI_BACKUP_DIR
-        value: /var/data/backups
-      - key: DB_ALLOW_MEMORY_FALLBACK
+      # Set this to the staging MongoDB connection string in the Render dashboard.
+      - key: MONGODB_URI
+        sync: false
+      # Keep true until the SQLite importer has populated the target database.
+      - key: NEERDRISHTI_STAGING_IMPORT_MODE
+        value: "true"
+      - key: NEERDRISHTI_SEED_REFERENCE_DATA
         value: "false"
       - key: APP_BASE_URL
         sync: false                    # e.g. https://neerdrishti.onrender.com

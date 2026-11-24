@@ -1,15 +1,12 @@
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
 import net from 'node:net';
 import tls from 'node:tls';
-import { DatabaseSync } from 'node:sqlite';
+import { getMongoTestUri, connectMongoTest, dropMongoTestDb, closeMongoTest, assertSafeMongoTestUri } from './helpers/mongo_test_harness';
 
-const PROJECT_ROOT = process.cwd();
-const SOURCE_DB = path.join(PROJECT_ROOT, 'data', 'neerdrishti.db');
-const TEST_DB = path.join(os.tmpdir(), `neerdrishti-notification-test-${Date.now()}.db`);
+const MONGO_URI = getMongoTestUri();
+assertSafeMongoTestUri(MONGO_URI);
+let mongo: any;
 
 const originalFetch = globalThis.fetch;
 const originalNetConnect = (net as any).connect;
@@ -47,8 +44,8 @@ function setBaseEnv(): void {
   delete process.env.WHATSAPP_API_KEY;
   delete process.env.WHATSAPP_PHONE_NUMBER_ID;
 
-  process.env.DATABASE_PATH = TEST_DB;
-  process.env.NOTIFICATION_DRY_RUN = 'true';
+  process.env.MONGODB_URI = MONGO_URI;
+process.env.NOTIFICATION_DRY_RUN = 'true';
   process.env.NOTIFICATION_LIVE_SEND_ENABLED = 'false';
   process.env.NOTIFICATION_MAX_RETRIES = '2';
   process.env.NOTIFICATION_RETRY_BACKOFF_MS = '1';
@@ -56,22 +53,18 @@ function setBaseEnv(): void {
   process.env.MAIL_DRY_RUN = 'true';
 }
 
-function openDb(): DatabaseSync {
-  return new DatabaseSync(TEST_DB);
+async function resetFixtures(): Promise<void> {
+  await mongo.db.collection('notification_history').deleteMany({});
+  await mongo.db.collection('alert_subscriptions').deleteMany({});
+  await mongo.db.collection('notification_preferences').deleteMany({});
+  await mongo.db.collection('users').deleteMany({ email: { $regex: '^notify-test-' } });
+}
+async function nextSeq(name: string) {
+  const r = await mongo.db.collection('sequences').findOneAndUpdate({ name }, { $inc: { value: 1 } }, { upsert: true, returnDocument: 'after' });
+  return Number(r?.value || 1);
 }
 
-function resetFixtures(): void {
-  const db = openDb();
-  db.exec(`
-    DELETE FROM notification_history;
-    DELETE FROM alert_subscriptions;
-    DELETE FROM notification_preferences;
-    DELETE FROM users WHERE email LIKE 'notify-test-%';
-  `);
-  db.close();
-}
-
-function seedSubscriber(options: {
+async function seedSubscriber(options: {
   email?: string;
   phone?: string | null;
   districtId?: string;
@@ -83,59 +76,26 @@ function seedSubscriber(options: {
   unsubscribedAllAt?: string | null;
   status?: string;
   withPreferences?: boolean;
-} = {}): number {
+} = {}): Promise<number> {
   userSequence += 1;
-  const now = new Date().toISOString();
-  const db = openDb();
+  const now = new Date();
   const email = options.email || `notify-test-${userSequence}@example.com`;
-  const info = db.prepare(`
-    INSERT INTO users (
-      email, password_hash, full_name, role, status, phone, phone_verified,
-      email_verified_at, created_at, updated_at
-    ) VALUES (?, ?, ?, 'CITIZEN', ?, ?, 1, ?, ?, ?)
-  `).run(
-    email,
-    'not-a-real-password-hash',
-    `Notification Test ${userSequence}`,
-    options.status || 'ACTIVE',
-    options.phone === undefined ? '+919999999999' : options.phone,
-    now,
-    now,
-    now
-  );
-  const userId = Number(info.lastInsertRowid);
-  db.prepare(`
-    INSERT INTO alert_subscriptions (user_id, district_id, min_severity, created_at)
-    VALUES (?, ?, ?, ?)
-  `).run(userId, options.districtId || 'hyderabad', options.minSeverity || 'WATCH', now);
-
+  const userId = userSequence;
+  await mongo.db.collection('users').insertOne({
+    _id: userId, email, password_hash: 'not-a-real-password-hash', full_name: `Notification Test ${userSequence}`, role: 'CITIZEN', status: options.status || 'ACTIVE', phone: options.phone === undefined ? '+919999999999' : options.phone, phone_verified: 1, email_verified_at: now, created_at: now, updated_at: now,
+  });
+  await mongo.db.collection('alert_subscriptions').insertOne({ _id: await nextSeq('alert_subscriptions'), user_id: userId, district_id: options.districtId || 'hyderabad', min_severity: options.minSeverity || 'WATCH', created_at: now });
   if (options.withPreferences !== false) {
-    db.prepare(`
-      INSERT INTO notification_preferences (
-        user_id, email_enabled, sms_enabled, whatsapp_enabled,
-        consent_given_at, consent_source, unsubscribed_all_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      userId,
-      options.emailEnabled ?? 1,
-      options.smsEnabled ?? 0,
-      options.whatsappEnabled ?? 0,
-      options.consentGivenAt ?? null,
-      options.consentGivenAt ? 'test' : null,
-      options.unsubscribedAllAt ?? null,
-      now
-    );
+    await mongo.db.collection('notification_preferences').insertOne({
+      _id: userId, user_id: userId, email_enabled: options.emailEnabled ?? 1, sms_enabled: options.smsEnabled ?? 0, whatsapp_enabled: options.whatsappEnabled ?? 0,
+      consent_given_at: options.consentGivenAt || null, consent_source: options.consentGivenAt ? 'test' : null, unsubscribed_all_at: options.unsubscribedAllAt || null, updated_at: now,
+    });
   }
-
-  db.close();
   return userId;
 }
 
-function notificationRows(): any[] {
-  const db = openDb();
-  const rows = db.prepare('SELECT * FROM notification_history ORDER BY timestamp, id').all() as any[];
-  db.close();
-  return rows;
+async function notificationRows(): Promise<any[]> {
+  return await mongo.db.collection('notification_history').find({}).sort({ timestamp: 1, id: 1, _id: 1 }).toArray();
 }
 
 function mockProvider(channel: string, handler: (message: any, callNumber: number) => Promise<any>) {
@@ -185,7 +145,11 @@ function request(overrides: Record<string, any> = {}) {
 }
 
 before(async () => {
-  fs.copyFileSync(SOURCE_DB, TEST_DB);
+  process.env.MONGODB_URI = MONGO_URI;
+  mongo = await connectMongoTest(MONGO_URI);
+  await mongo.db.dropDatabase();
+  const { initDatabase } = await import('../src/db/mongo');
+  await initDatabase();
   setBaseEnv();
 
   globalThis.fetch = (async (input: any) => {
@@ -209,19 +173,17 @@ before(async () => {
   loadNotificationConfig = configModule.loadNotificationConfig;
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   setBaseEnv();
-  resetFixtures();
+  await resetFixtures();
   networkCalls.length = 0;
 });
 
-after(() => {
+after(async () => {
   globalThis.fetch = originalFetch;
   (net as any).connect = originalNetConnect;
   (tls as any).connect = originalTlsConnect;
-  for (const file of [TEST_DB, `${TEST_DB}-wal`, `${TEST_DB}-shm`]) {
-    try { fs.unlinkSync(file); } catch { /* ignore */ }
-  }
+  if (mongo) { await dropMongoTestDb(mongo); await closeMongoTest(mongo); }
 });
 
 test('defaults are DRY_RUN with SMS and WhatsApp disabled', () => {
@@ -239,7 +201,7 @@ test('defaults are DRY_RUN with SMS and WhatsApp disabled', () => {
 test('DRY_RUN invokes mocked SMTP, SMS and WhatsApp providers without network calls', async () => {
   process.env.SMS_ENABLED = 'true';
   process.env.WHATSAPP_ENABLED = 'true';
-  seedSubscriber({
+  await seedSubscriber({
     emailEnabled: 1,
     smsEnabled: 1,
     whatsappEnabled: 1,
@@ -263,7 +225,7 @@ test('DRY_RUN invokes mocked SMTP, SMS and WhatsApp providers without network ca
   assert.equal(whatsapp.calls.length, 1);
   assert.equal(networkCalls.length, 0);
 
-  const rows = notificationRows();
+  const rows = await notificationRows();
   assert.equal(rows.length, 3);
   assert.deepEqual(rows.map(row => row.delivery_status), ['DRY_RUN', 'DRY_RUN', 'DRY_RUN']);
   assert.deepEqual(rows.map(row => row.status), ['DRY_RUN', 'DRY_RUN', 'DRY_RUN']);
@@ -273,10 +235,10 @@ test('DRY_RUN invokes mocked SMTP, SMS and WhatsApp providers without network ca
 });
 
 test('email dry-run records the payload without SMTP credentials', async () => {
-  seedSubscriber({ emailEnabled: 1 });
+  await seedSubscriber({ emailEnabled: 1 });
   const service = newService();
   const result = await service.dispatch(request());
-  const row = notificationRows()[0];
+  const row = await notificationRows()[0];
   const metadata = JSON.parse(row.metadata);
 
   assert.equal(result.results[0].status, 'DRY_RUN');
@@ -305,7 +267,7 @@ test('MAIL_DRY_RUN=false still cannot enable live email delivery', async () => {
   process.env.MAIL_FROM = 'alerts@example.test';
   process.env.NOTIFICATION_DRY_RUN = 'false';
   process.env.NOTIFICATION_LIVE_SEND_ENABLED = 'true';
-  seedSubscriber({ emailEnabled: 1 });
+  await seedSubscriber({ emailEnabled: 1 });
 
   const config = loadNotificationConfig();
   const service = newService({ config });
@@ -315,13 +277,13 @@ test('MAIL_DRY_RUN=false still cannot enable live email delivery', async () => {
   assert.equal(config.masterDryRun, true);
   assert.equal(result.results[0].status, 'DRY_RUN');
   assert.equal(networkCalls.length, 0);
-  assert.equal(notificationRows()[0].provider_message_id, null);
+  const rowsAfter = await notificationRows(); assert.equal(rowsAfter[0].provider_message_id, null);
 });
 
 test('SMS and WhatsApp require recorded consent', async () => {
   process.env.SMS_ENABLED = 'true';
   process.env.WHATSAPP_ENABLED = 'true';
-  seedSubscriber({
+  await seedSubscriber({
     emailEnabled: 0,
     smsEnabled: 1,
     whatsappEnabled: 1,
@@ -338,14 +300,14 @@ test('SMS and WhatsApp require recorded consent', async () => {
   assert.deepEqual(result.results.map(item => item.skipReason), ['CONSENT_REQUIRED', 'CONSENT_REQUIRED']);
   assert.equal(sms.calls.length, 0);
   assert.equal(whatsapp.calls.length, 0);
-  assert.equal(notificationRows().length, 0);
+  assert.equal((await notificationRows()).length, 0);
   assert.equal(networkCalls.length, 0);
 });
 
 test('unsubscribe_all blocks every channel', async () => {
   process.env.SMS_ENABLED = 'true';
   process.env.WHATSAPP_ENABLED = 'true';
-  seedSubscriber({
+  await seedSubscriber({
     emailEnabled: 1,
     smsEnabled: 1,
     whatsappEnabled: 1,
@@ -362,11 +324,11 @@ test('unsubscribe_all blocks every channel', async () => {
   assert.equal(result.summary.SKIPPED, 3);
   assert.ok(result.results.every(item => item.skipReason === 'UNSUBSCRIBED'));
   assert.equal(email.calls.length + sms.calls.length + whatsapp.calls.length, 0);
-  assert.equal(notificationRows().length, 0);
+  assert.equal((await notificationRows()).length, 0);
 });
 
 test('provider enable flags remain off by default', async () => {
-  seedSubscriber({
+  await seedSubscriber({
     emailEnabled: 0,
     smsEnabled: 1,
     whatsappEnabled: 1,
@@ -384,26 +346,26 @@ test('provider enable flags remain off by default', async () => {
 });
 
 test('missing notification preferences skip delivery', async () => {
-  seedSubscriber({ withPreferences: false });
+  await seedSubscriber({ withPreferences: false });
   const service = newService();
   const result = await service.dispatch(request());
   assert.equal(result.results[0].status, 'SKIPPED');
   assert.equal(result.results[0].skipReason, 'NO_PREFERENCES');
-  assert.equal(notificationRows().length, 0);
+  assert.equal((await notificationRows()).length, 0);
 });
 
 test('subscription minimum severity suppresses lower alerts', async () => {
-  seedSubscriber({ minSeverity: 'HIGH', emailEnabled: 1 });
+  await seedSubscriber({ minSeverity: 'HIGH', emailEnabled: 1 });
   const service = newService();
   const result = await service.dispatch(request({ alertLevel: 'WATCH' }));
   assert.equal(result.totalCandidates, 0);
-  assert.equal(notificationRows().length, 0);
+  assert.equal((await notificationRows()).length, 0);
 });
 
 test('per-user per-channel rate limit prevents a second dry-run attempt', async () => {
   process.env.SMS_ENABLED = 'true';
   process.env.NOTIFICATION_RATE_LIMIT_PER_HOUR = '1';
-  seedSubscriber({ emailEnabled: 0, smsEnabled: 1, consentGivenAt: new Date().toISOString() });
+  await seedSubscriber({ emailEnabled: 0, smsEnabled: 1, consentGivenAt: new Date().toISOString() });
   const sms = dryRunProvider('SMS');
   const config = loadNotificationConfig();
   const service = newService({
@@ -418,7 +380,7 @@ test('per-user per-channel rate limit prevents a second dry-run attempt', async 
   assert.equal(first.results[0].status, 'DRY_RUN');
   assert.equal(second.results[0].status, 'RATE_LIMITED');
   assert.equal(sms.calls.length, 1);
-  const rows = notificationRows();
+  const rows = await notificationRows();
   assert.deepEqual(rows.map(row => row.delivery_status), ['DRY_RUN', 'RATE_LIMITED']);
   assert.equal(rows[1].provider_message_id, null);
 });
@@ -426,7 +388,7 @@ test('per-user per-channel rate limit prevents a second dry-run attempt', async 
 test('bounded retries stop after the configured maximum and never record SENT', async () => {
   process.env.SMS_ENABLED = 'true';
   process.env.NOTIFICATION_MAX_RETRIES = '2';
-  seedSubscriber({ emailEnabled: 0, smsEnabled: 1, consentGivenAt: new Date().toISOString() });
+  await seedSubscriber({ emailEnabled: 0, smsEnabled: 1, consentGivenAt: new Date().toISOString() });
   const sms = mockProvider('SMS', async () => ({
     status: 'FAILED',
     simulated: false,
@@ -438,7 +400,7 @@ test('bounded retries stop after the configured maximum and never record SENT', 
   const service = newService({ providers: { SMS: sms } });
 
   const result = await service.dispatch(request({ channels: ['SMS'] }));
-  const row = notificationRows()[0];
+  const row = await notificationRows()[0];
 
   assert.equal(sms.calls.length, 3);
   assert.equal(result.results[0].status, 'FAILED');
@@ -454,7 +416,7 @@ test('bounded retries stop after the configured maximum and never record SENT', 
 test('retry can recover to a DRY_RUN result without network calls', async () => {
   process.env.SMS_ENABLED = 'true';
   process.env.NOTIFICATION_MAX_RETRIES = '2';
-  seedSubscriber({ emailEnabled: 0, smsEnabled: 1, consentGivenAt: new Date().toISOString() });
+  await seedSubscriber({ emailEnabled: 0, smsEnabled: 1, consentGivenAt: new Date().toISOString() });
   const sms = mockProvider('SMS', async (_message, callNumber) => {
     if (callNumber === 1) {
       return {
@@ -478,7 +440,7 @@ test('retry can recover to a DRY_RUN result without network calls', async () => 
   const service = newService({ providers: { SMS: sms } });
 
   const result = await service.dispatch(request({ channels: ['SMS'] }));
-  const row = notificationRows()[0];
+  const row = await notificationRows()[0];
 
   assert.equal(sms.calls.length, 2);
   assert.equal(result.results[0].status, 'DRY_RUN');
@@ -491,7 +453,7 @@ test('retry can recover to a DRY_RUN result without network calls', async () => 
 
 test('provider SENT without real confirmation or message ID is downgraded to FAILED', async () => {
   process.env.SMS_ENABLED = 'true';
-  seedSubscriber({ emailEnabled: 0, smsEnabled: 1, consentGivenAt: new Date().toISOString() });
+  await seedSubscriber({ emailEnabled: 0, smsEnabled: 1, consentGivenAt: new Date().toISOString() });
   const sms = mockProvider('SMS', async () => ({
     status: 'SENT',
     simulated: false,
@@ -507,7 +469,7 @@ test('provider SENT without real confirmation or message ID is downgraded to FAI
   const service = newService({ config, providers: { SMS: sms } });
 
   const result = await service.dispatch(request({ channels: ['SMS'] }));
-  const row = notificationRows()[0];
+  const row = await notificationRows()[0];
 
   assert.equal(result.results[0].status, 'FAILED');
   assert.equal(result.results[0].error, 'UNCONFIRMED_PROVIDER_SUCCESS');
@@ -518,7 +480,7 @@ test('provider SENT without real confirmation or message ID is downgraded to FAI
 
 test('provider SENT is rejected while master DRY_RUN is active', async () => {
   process.env.SMS_ENABLED = 'true';
-  seedSubscriber({ emailEnabled: 0, smsEnabled: 1, consentGivenAt: new Date().toISOString() });
+  await seedSubscriber({ emailEnabled: 0, smsEnabled: 1, consentGivenAt: new Date().toISOString() });
   const sms = mockProvider('SMS', async () => ({
     status: 'SENT',
     simulated: false,
@@ -529,7 +491,7 @@ test('provider SENT is rejected while master DRY_RUN is active', async () => {
   const service = newService({ providers: { SMS: sms } });
 
   const result = await service.dispatch(request({ channels: ['SMS'] }));
-  const row = notificationRows()[0];
+  const row = await notificationRows()[0];
 
   assert.equal(result.results[0].status, 'FAILED');
   assert.equal(result.results[0].error, 'DRY_RUN_PROVIDER_RETURNED_SENT');

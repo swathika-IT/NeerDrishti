@@ -12,7 +12,7 @@ export interface ShutdownLogger {
 export interface GracefulShutdownOptions {
   server: ClosableServer;
   stopBackgroundJobs?: () => void | Promise<void>;
-  closeDatabase?: () => void;
+  closeDatabase?: () => unknown | Promise<unknown>;
   timeoutMs?: number;
   logger?: ShutdownLogger;
   exit?: (code: number) => void;
@@ -67,10 +67,10 @@ export function createGracefulShutdown(options: GracefulShutdownOptions): Gracef
         logger.error(JSON.stringify({ type: 'shutdown', event: 'idle_connection_close_failed', error: safeError(error) }));
       }
 
-      const closeDatabase = () => {
+      const closeDatabase = async () => {
         if (!options.closeDatabase) return;
         try {
-          options.closeDatabase();
+          await options.closeDatabase();
         } catch (error) {
           logger.error(JSON.stringify({ type: 'shutdown', event: 'database_close_failed', error: safeError(error) }));
         }
@@ -81,7 +81,7 @@ export function createGracefulShutdown(options: GracefulShutdownOptions): Gracef
           if (finished) return;
           finished = true;
           clearTimeout(timer);
-          closeDatabase();
+           void closeDatabase();
           logger.info(
             JSON.stringify({
               type: 'shutdown',

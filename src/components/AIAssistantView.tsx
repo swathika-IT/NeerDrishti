@@ -22,10 +22,17 @@ import {
   Mic,
   MicOff,
   Volume2,
-  VolumeX
+  VolumeX,
+  RotateCcw,
+  Trash2,
+  AlertCircle,
+  LockKeyhole,
+  MessageCircle
 } from 'lucide-react';
 import { DistrictStatus } from '../types';
-import { GroundedAIResponse } from '../types/ai';
+import { ApiError, apiFetch } from '../lib/api';
+
+type Lang = 'en' | 'te' | 'hi';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -39,14 +46,101 @@ interface Message {
   isPrototype?: boolean;
   source?: string;
   timestamp?: string;
+  isWelcome?: boolean;
+  error?: boolean;
+  canRetry?: boolean;
 }
 
 interface AIAssistantViewProps {
   districts: DistrictStatus[];
 }
 
+const UI_TEXT: Record<Lang, { title: string; subtitle: string; typing: string; clear: string; retry: string; privateSession: string; starters: string; emptyReply: string; input: string; errorPrefix: string }> = {
+  en: {
+    title: 'NeerDrishti AI Assistant',
+    subtitle: 'Friendly flood-intelligence help in English, Telugu and Hindi.',
+    typing: 'Thinking of a helpful answer...',
+    clear: 'New chat',
+    retry: 'Retry',
+    privateSession: 'Private session · no history stored on this device',
+    starters: 'Try asking',
+    emptyReply: 'I could not prepare a response. Please try again.',
+    input: 'Ask me anything about NeerDrishti, floods or safety...',
+    errorPrefix: 'Sorry, I could not reach the assistant right now.',
+  },
+  te: {
+    title: 'నీర్ దృష్టి AI సహాయకుడు',
+    subtitle: 'ఇంగ్లీష్, తెలుగు మరియు హిందీలో స్నేహితుల వంటి వరద సమాచార సహాయం.',
+    typing: 'సహాయకరమైన సమాధానం సిద్ధం చేస్తున్నాను...',
+    clear: 'కొత్త చాట్',
+    retry: 'మళ్లీ ప్రయత్నించండి',
+    privateSession: 'ప్రైవేట్ సెషన్ · ఈ పరికరంలో చరిత్ర భద్రపరచబడదు',
+    starters: 'ఇలా అడగండి',
+    emptyReply: 'సమాధానం సిద్ధం కాలేకపోయాను. దయచేసి మళ్లీ ప్రయత్నించండి.',
+    input: 'నీర్ దృష్టి, వరదలు లేదా రక్షణ గురించి ఏదైనా అడగండి...',
+    errorPrefix: 'క్షమించండి, సహాయకుడిని చేరుకోవడం కుదరలేదు.',
+  },
+  hi: {
+    title: 'नीरदृष्टि AI सहायक',
+    subtitle: 'अंग्रेज़ी, तेलुगु और हिंदी में दोस्ताना बाढ़-सूचना सहायता।',
+    typing: 'एक उपयोगी उत्तर तैयार कर रहा हूँ...',
+    clear: 'नई चैट',
+    retry: 'पुनः प्रयास करें',
+    privateSession: 'निजी सत्र · इस डिवाइस पर इतिहास संग्रहीत नहीं होता',
+    starters: 'ऐसा पूछें',
+    emptyReply: 'मैं उत्तर तैयार नहीं कर पाया। कृपया फिर से प्रयास करें।',
+    input: 'नीरदृष्टि, बाढ़ या सुरक्षा के बारे में कुछ भी पूछें...',
+    errorPrefix: 'क्षमा करें, मैं अभी सहायक तक नहीं पहुँच पाया।',
+  },
+};
+
+function welcomeMessage(lang: Lang): Message {
+  const content = {
+    en: 'Hello! Welcome to NeerDrishti. How can I help you today?',
+    te: 'నమస్కారం! నీర్ దృష్టికి స్వాగతం. ఈ రోజు నేను మీకు ఎలా సహాయం చేయగలను?',
+    hi: 'नमस्ते! नीरदृष्टि में आपका स्वागत है। आज मैं आपकी क्या मदद कर सकता हूँ?',
+  }[lang];
+  return {
+    role: 'assistant',
+    content,
+    isWelcome: true,
+    transparencyBadges: ['English · తెలుగు · हिन्दी', 'Grounded Flood Intelligence'],
+    source: 'NeerDrishti AI',
+  };
+}
+
+function errorMessage(lang: Lang, detail?: string): Message {
+  const text = detail ? `${UI_TEXT[lang].errorPrefix} ${detail}` : UI_TEXT[lang].errorPrefix;
+  return { role: 'assistant', content: text, error: true, canRetry: true, transparencyBadges: [] };
+}
+
+function inlineText(value: string): React.ReactNode[] {
+  return value.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, idx) => {
+    if (/^\*\*[^*]+\*\*$/.test(part)) {
+      return <strong key={idx}>{part.slice(2, -2)}</strong>;
+    }
+    if (/^`[^`]+`$/.test(part)) {
+      return <code key={idx} className="rounded bg-slate-200/70 px-1 py-0.5 text-[10px]">{part.slice(1, -1)}</code>;
+    }
+    return <React.Fragment key={idx}>{part}</React.Fragment>;
+  });
+}
+
+function renderContent(value: string): React.ReactNode[] {
+  return String(value || '').split('\n').map((line, idx) => {
+    if (line.trim() === '---') return <hr key={idx} className="my-2 border-slate-200" />;
+    if (/^####\s+/.test(line)) return <p key={idx} className="pt-1 font-semibold text-slate-900">{inlineText(line.replace(/^####\s+/, ''))}</p>;
+    if (/^###\s+/.test(line)) return <p key={idx} className="font-bold text-slate-900">{inlineText(line.replace(/^###\s+/, ''))}</p>;
+    if (/^#####\s+/.test(line)) return <p key={idx} className="pt-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">{inlineText(line.replace(/^#####\s+/, ''))}</p>;
+    if (/^[-*]\s+/.test(line)) return <div key={idx} className="flex gap-2"><span aria-hidden="true">•</span><span>{inlineText(line.replace(/^[-*]\s+/, ''))}</span></div>;
+    if (/^>\s?/.test(line)) return <blockquote key={idx} className="border-l-2 border-indigo-300 pl-2 italic text-slate-700">{inlineText(line.replace(/^>\s?/, ''))}</blockquote>;
+    if (!line.trim()) return <div key={idx} className="h-1" />;
+    return <p key={idx}>{inlineText(line)}</p>;
+  });
+}
+
 export const AIAssistantView: React.FC<AIAssistantViewProps> = ({ districts }) => {
-  const [language, setLanguage] = useState<'en' | 'te' | 'hi'>('en');
+  const [language, setLanguage] = useState<Lang>('en');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchDistrict, setSearchDistrict] = useState<string>('');
   const [kbQuery, setKbQuery] = useState<string>('');
@@ -59,31 +153,12 @@ export const AIAssistantView: React.FC<AIAssistantViewProps> = ({ districts }) =
   const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: 'assistant',
-      content: `### 🌊 Namaskaram! I am the NeerDrishti Grounded AI Flood Intelligence Engine.
-I provide strictly grounded flood risk intelligence, explain multi-factor mathematical calculations (35% Rain, 25% History, 15% Terrain, 15% Citizen, 10% Drainage), analyze predictive forecast horizons (+3h, +6h, +12h, +24h), and generate public safety advisories in **English**, **Telugu (తెలుగు)**, and **Hindi (हिन्दी)** across all **33 Telangana districts**.
-
-**Grounded Knowledge & Evidence Architecture:**
-* **Priority Flood Monitoring (5 Districts):** Hyderabad, Warangal, Nirmal, Mancherial, Bhadradri Kothagudem (Deep hydrological knowledge base & ground telemetry)
-* **Standard Monitoring (15 Districts):** Seasonal flood-prone and major river basin districts
-* **Limited Data Districts (13 Districts):** Baseline prototype scoring with transparent limitations
-* **Data Provenance:** Every response strictly cites mathematical risk indices, forecast projections, and active telemetry badges.
-
-How can I assist your flood preparedness or district analysis today?`,
-      transparencyBadges: [
-        'Deterministic 5-Factor Risk Model',
-        'Multi-Horizon Forecast Engine',
-        'Verified Knowledge Base',
-        '⚡ SIMULATION DATA USED'
-      ],
-      source: 'NeerDrishti Engine',
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([welcomeMessage('en')]);
   const [input, setInput] = useState<string>('');
   const [isTyping, setIsTyping] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const conversationIdRef = useRef<string | null>(null);
+  const lastRequestRef = useRef<{ message: string; language: Lang; districtContext?: string } | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -222,35 +297,46 @@ How can I assist your flood preparedness or district analysis today?`,
     window.speechSynthesis.speak(utterance);
   };
 
-  const handleSend = async (textToSend?: string, langOverride?: 'en' | 'te' | 'hi') => {
-    const query = textToSend || input;
-    if (!query.trim()) return;
+  const handleSend = async (textToSend?: string, langOverride?: Lang, retry = false) => {
+    const query = (textToSend || input).trim();
+    if (!query || isTyping) return;
 
     const currentLang = langOverride || language;
-    const userMsg: Message = { role: 'user', content: query };
-    setMessages((prev) => [...prev, userMsg]);
-    if (!textToSend) setInput('');
+    const districtContext = searchDistrict || undefined;
+    lastRequestRef.current = { message: query, language: currentLang, districtContext };
+
+    if (retry) {
+      setMessages((prev) => {
+        const next = [...prev];
+        if (next.length > 0 && next[next.length - 1].error) next.pop();
+        return next;
+      });
+    } else {
+      setMessages((prev) => [...prev, { role: 'user', content: query }]);
+      if (!textToSend) setInput('');
+    }
     setIsTyping(true);
 
     try {
-      const res = await fetch('/api/ai/chat', {
+      const data = await apiFetch<any>('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           message: query,
           language: currentLang,
-          districtContext: searchDistrict || undefined,
+          districtContext,
+          conversationId: conversationIdRef.current || undefined,
         }),
       });
-      const data = await res.json();
+      if (data.conversationId) conversationIdRef.current = data.conversationId;
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
-          content: data.reply || data.answer || 'Response generated.',
-          district: data.district,
-          risk_score: data.risk_score,
-          risk_category: data.risk_category,
+          content: data.reply || data.answer || UI_TEXT[currentLang].emptyReply,
+          district: data.district || undefined,
+          risk_score: typeof data.risk_score === 'number' ? data.risk_score : undefined,
+          risk_category: data.risk_category || undefined,
           transparencyBadges: data.transparencyBadges,
           intent: data.intent,
           isSimulated: data.isSimulated,
@@ -260,28 +346,49 @@ How can I assist your flood preparedness or district analysis today?`,
         },
       ]);
     } catch (err) {
-      console.error('Chat AI failed:', err);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: 'I apologize, but I encountered a temporary connection issue. Please verify that your system is running and try again.',
-        },
-      ]);
+      const detail = err instanceof ApiError ? err.message : undefined;
+      setMessages((prev) => [...prev, errorMessage(currentLang, detail)]);
     } finally {
       setIsTyping(false);
     }
+  };
+
+  const handleRetry = () => {
+    const last = lastRequestRef.current;
+    if (last) handleSend(last.message, last.language, true);
+  };
+
+  const handleClear = async () => {
+    const id = conversationIdRef.current;
+    conversationIdRef.current = null;
+    lastRequestRef.current = null;
+    setInput('');
+    setMessages([welcomeMessage(language)]);
+    if (!id) return;
+    try {
+      await apiFetch('/api/ai/chat/clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: id }),
+      });
+    } catch {
+      setIsTyping(false);
+    }
+  };
+
+  const changeLanguage = (next: Lang) => {
+    setLanguage(next);
+    setMessages((prev) => prev.length === 1 && prev[0].isWelcome ? [welcomeMessage(next)] : prev);
   };
 
   const handleKbSearch = async () => {
     if (!kbQuery.trim()) return;
     setIsSearchingKb(true);
     try {
-      const res = await fetch(`/api/knowledge/search?q=${encodeURIComponent(kbQuery)}&limit=3`);
-      const data = await res.json();
+      const data = await apiFetch<any>(`/api/knowledge/search?q=${encodeURIComponent(kbQuery)}&limit=3`);
       setKbResults(data.results || []);
-    } catch (err) {
-      console.error('KB search failed:', err);
+    } catch {
+      setKbResults([]);
     } finally {
       setIsSearchingKb(false);
     }
@@ -290,11 +397,60 @@ How can I assist your flood preparedness or district analysis today?`,
   // Structured prompt categories with trilingual labels
   const promptCategories = [
     { id: 'all', labelEn: 'All Queries', labelTe: 'అన్ని ప్రశ్నలు', labelHi: 'सभी प्रश्न', icon: Sparkles },
+    { id: 'conversation', labelEn: 'Getting Started', labelTe: 'మొదలుపెట్టండి', labelHi: 'शुरुआत', icon: MessageCircle },
     { id: 'risk', labelEn: 'District Risk & Factors', labelTe: 'వరద ముప్పు & కారకాలు', labelHi: 'जोखिम एवं कारक', icon: Info },
     { id: 'forecast', labelEn: 'Forecasts & Trends', labelTe: 'సూచనలు & ధోరణులు', labelHi: 'पूर्वानुमान एवं रुझान', icon: TrendingUp },
     { id: 'alert', labelEn: 'Alert Intelligence', labelTe: 'అలర్ట్ వివరాలు', labelHi: 'अलर्ट इंटेलिजेंस', icon: AlertTriangle },
     { id: 'compare', labelEn: 'District Comparison', labelTe: 'జిల్లాల పోలిక', labelHi: 'जिलों की तुलना', icon: Scale },
     { id: 'safety', labelEn: 'Safety Protocols', labelTe: 'రక్షణ పద్ధతులు', labelHi: 'सुरक्षा नियम', icon: LifeBuoy },
+  ];
+
+  const starterPrompts = [
+    {
+      cat: 'conversation',
+      chipLabelEn: 'Hello! What can you help me with?',
+      chipLabelTe: 'హలో! మీరు ఏమి సహాయం చేయగలరు?',
+      chipLabelHi: 'नमस्ते! आप क्या मदद कर सकते हैं?',
+      textEn: 'Hello! What can you help me with?',
+      textTe: 'హలో! మీరు ఏమి సహాయం చేయగలరు?',
+      textHi: 'नमस्ते! आप क्या मदद कर सकते हैं?',
+    },
+    {
+      cat: 'conversation',
+      chipLabelEn: 'Explain NeerDrishti',
+      chipLabelTe: 'నీర్ దృష్టి వివరించండి',
+      chipLabelHi: 'नीरदृष्टि समझाइए',
+      textEn: 'Explain NeerDrishti.',
+      textTe: 'నీర్ దృష్టి గురించి వివరించండి.',
+      textHi: 'नीरदृष्टि के बारे में समझाइए।',
+    },
+    {
+      cat: 'conversation',
+      chipLabelEn: 'Check flood risk in Warangal',
+      chipLabelTe: 'వరంగల్ వరద ముప్పు తనిఖీ',
+      chipLabelHi: 'वारंगल बाढ़ जोखिम देखें',
+      textEn: 'Check flood risk in Warangal.',
+      textTe: 'వరంగల్ జిల్లాలో వరద ముప్పు తనిఖీ చేయండి.',
+      textHi: 'वारंगल जिले में बाढ़ जोखिम देखें।',
+    },
+    {
+      cat: 'conversation',
+      chipLabelEn: 'Explain the latest rainfall information',
+      chipLabelTe: 'తాజా వర్షపాత వివరాలు',
+      chipLabelHi: 'नवीनतम वर्षा जानकारी समझाएँ',
+      textEn: 'Explain the latest rainfall information.',
+      textTe: 'తాజా వర్షపాత సమాచారాన్ని వివరించండి.',
+      textHi: 'नवीनतम वर्षा की जानकारी समझाएँ।',
+    },
+    {
+      cat: 'conversation',
+      chipLabelEn: 'What should I do during flooding?',
+      chipLabelTe: 'వరదల్లో ఏమి చేయాలి?',
+      chipLabelHi: 'बाढ़ के दौरान क्या करें?',
+      textEn: 'What should I do during flooding?',
+      textTe: 'వరదల సమయంలో నేను ఏమి చేయాలి?',
+      textHi: 'बाढ़ के दौरान मुझे क्या करना चाहिए?',
+    },
   ];
 
   const samplePrompts = [
@@ -372,40 +528,38 @@ How can I assist your flood preparedness or district analysis today?`,
     },
   ];
 
-  const filteredPrompts = samplePrompts.filter(p => {
-    if (selectedCategory === 'all') return true;
-    return p.cat === selectedCategory;
-  });
+  const filteredPrompts = selectedCategory === 'conversation'
+    ? starterPrompts
+    : selectedCategory === 'all'
+      ? starterPrompts
+      : samplePrompts.filter(p => p.cat === selectedCategory);
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Top Header Card */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-xs">
-              <Bot className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                <span>Grounded AI Flood Assistant & RAG Intelligence</span>
-                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
-                  Phase G
-                </span>
-              </h1>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Multi-signal grounded reasoning powered by 5-Factor Risk Model, Predictive Horizons (+3h, +6h, +12h, +24h), and Hydrological RAG.
-              </p>
-            </div>
+      <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-600 to-blue-600 text-white flex items-center justify-center shadow-sm shrink-0">
+            <Bot className="w-5 h-5" />
+          </div>
+          <div>
+            <h1 className="text-lg sm:text-xl font-bold text-slate-900 flex flex-wrap items-center gap-2">
+              <span>{UI_TEXT[language].title}</span>
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                Conversational
+              </span>
+            </h1>
+            <p className="text-xs text-slate-500 mt-0.5">{UI_TEXT[language].subtitle}</p>
+            <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+              <LockKeyhole className="w-3 h-3" />
+              {UI_TEXT[language].privateSession}
+            </p>
           </div>
         </div>
 
-        {/* Language & District Context Selectors */}
-        <div className="flex items-center gap-3">
-          {/* Language Switch */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
           <div className="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-semibold">
             <button
-              onClick={() => setLanguage('en')}
+              onClick={() => changeLanguage('en')}
               className={`px-3 py-1.5 rounded-md transition-all ${
                 language === 'en'
                   ? 'bg-white text-slate-900 shadow-2xs font-bold'
@@ -415,7 +569,7 @@ How can I assist your flood preparedness or district analysis today?`,
               English
             </button>
             <button
-              onClick={() => setLanguage('te')}
+              onClick={() => changeLanguage('te')}
               className={`px-3 py-1.5 rounded-md transition-all flex items-center gap-1 ${
                 language === 'te'
                   ? 'bg-indigo-600 text-white shadow-2xs font-bold'
@@ -426,7 +580,7 @@ How can I assist your flood preparedness or district analysis today?`,
               <span>తెలుగు</span>
             </button>
             <button
-              onClick={() => setLanguage('hi')}
+              onClick={() => changeLanguage('hi')}
               className={`px-3 py-1.5 rounded-md transition-all flex items-center gap-1 ${
                 language === 'hi'
                   ? 'bg-indigo-600 text-white shadow-2xs font-bold'
@@ -438,11 +592,10 @@ How can I assist your flood preparedness or district analysis today?`,
             </button>
           </div>
 
-          {/* District Context Focus */}
           <select
             value={searchDistrict}
             onChange={(e) => setSearchDistrict(e.target.value)}
-            className="text-xs font-medium bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="text-xs font-medium bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
             <option value="">All Districts Context</option>
             {districts.map((d) => (
@@ -451,13 +604,23 @@ How can I assist your flood preparedness or district analysis today?`,
               </option>
             ))}
           </select>
+
+          <button
+            type="button"
+            id="ai-clear-chat-btn"
+            onClick={handleClear}
+            className="px-3 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 flex items-center justify-center gap-1.5 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            {UI_TEXT[language].clear}
+          </button>
         </div>
       </div>
 
       {/* Main Content Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Chat Area */}
-        <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col h-[720px]">
+        <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col h-[560px] sm:h-[680px] lg:h-[720px]">
           {/* Category Filter Chips */}
           <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50/60 overflow-x-auto flex gap-1.5 items-center">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-1 shrink-0">
@@ -507,20 +670,22 @@ How can I assist your flood preparedness or district analysis today?`,
               return (
                 <div
                   key={i}
-                  className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}
+                  className={`flex max-w-full gap-2 sm:gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}
                 >
                   {!isUser && (
-                    <div className="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
                       <Bot className="w-4 h-4" />
                     </div>
                   )}
 
-                  <div className={`max-w-[88%] space-y-2`}>
+                  <div className="max-w-[92%] sm:max-w-[82%] space-y-2 min-w-0">
                     {/* Main Bubble */}
                     <div
-                      className={`rounded-2xl p-4 sm:p-5 text-xs sm:text-sm leading-relaxed shadow-2xs ${
+                      className={`rounded-2xl p-3 sm:p-4 text-xs sm:text-sm leading-relaxed shadow-2xs break-words ${
                         isUser
                           ? 'bg-blue-600 text-white font-medium rounded-br-xs'
+                          : msg.error
+                          ? 'bg-rose-50 border border-rose-200 text-rose-900 rounded-bl-xs'
                           : 'bg-slate-50/90 border border-slate-200 text-slate-800 rounded-bl-xs'
                       }`}
                     >
@@ -544,11 +709,29 @@ How can I assist your flood preparedness or district analysis today?`,
                         </div>
                       )}
 
-                      <div className="whitespace-pre-wrap">{msg.content}</div>
+                      <div className="space-y-0.5 break-words">{msg.error ? null : renderContent(msg.content)}</div>
 
                       {/* Footer: Grounding Transparency Badges & Speech Output Button */}
                       {!isUser && (
                         <div className="mt-4 pt-3 border-t border-slate-200/70 flex flex-wrap items-center justify-between gap-2">
+                          {msg.error && (
+                            <div className="w-full flex flex-wrap items-center gap-2 text-rose-700 text-[11px] font-semibold">
+                              <AlertCircle className="w-3.5 h-3.5" />
+                              <span>{msg.content}</span>
+                              {msg.canRetry && (
+                                <button
+                                  type="button"
+                                  id="ai-retry-btn"
+                                  onClick={handleRetry}
+                                  disabled={isTyping}
+                                  className="ml-auto px-2.5 py-1 rounded-md bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 flex items-center gap-1"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                  {UI_TEXT[language].retry}
+                                </button>
+                              )}
+                            </div>
+                          )}
                           <div className="flex flex-wrap gap-1.5 items-center">
                             {msg.transparencyBadges && msg.transparencyBadges.length > 0 && (
                               <>
@@ -603,7 +786,7 @@ How can I assist your flood preparedness or district analysis today?`,
                   </div>
 
                   {isUser && (
-                    <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-slate-800 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
                       <User className="w-4 h-4" />
                     </div>
                   )}
@@ -620,15 +803,17 @@ How can I assist your flood preparedness or district analysis today?`,
                   <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-bounce" />
                   <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-bounce delay-100" />
                   <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-bounce delay-200" />
-                  <span className="ml-2 text-slate-600 font-medium">Retrieving grounded knowledge & synthesizing telemetry...</span>
+                  <span className="ml-2 text-slate-600 font-medium">{UI_TEXT[language].typing}</span>
                 </div>
               </div>
             )}
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Prompt Suggestion Chips (with Hindi labels) */}
-          <div className="p-2 border-t border-slate-100 bg-slate-50/70 overflow-x-auto flex gap-2">
+          <div className="p-2 border-t border-slate-100 bg-slate-50/70 overflow-x-auto flex gap-2 items-center">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 shrink-0 mr-1">
+              {UI_TEXT[language].starters}
+            </span>
             {filteredPrompts.slice(0, 6).map((p, idx) => {
               const label = language === 'hi' ? p.chipLabelHi : language === 'te' ? p.chipLabelTe : p.chipLabelEn;
               const text = language === 'hi' ? p.textHi : language === 'te' ? p.textTe : p.textEn;
@@ -679,13 +864,7 @@ How can I assist your flood preparedness or district analysis today?`,
                 id="ai-chat-input"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder={
-                  language === 'hi'
-                    ? "बाढ़ के जोखिम, पूर्वानुमान, नाला रुकावट या सुरक्षा सलाह के बारे में पूछें (या माइक दबाकर बोलें)..."
-                    : language === 'te'
-                    ? "వరద ముప్పు, సూచనలు, నాలాల వివరాలు లేదా రక్షణ సలహాల గురించి అడగండి..."
-                    : "Ask about district flood risks, forecast trends, nala bottlenecks, or Telugu/Hindi safety advisories..."
-                }
+                placeholder={UI_TEXT[language].input}
                 className="flex-1 bg-slate-50 border border-slate-300 rounded-lg px-4 py-2.5 text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
 

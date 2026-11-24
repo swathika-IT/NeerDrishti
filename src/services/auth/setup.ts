@@ -14,9 +14,9 @@ let setupTokenHash: string | null = null;
 let setupTokenIssuedAt: number | null = null;
 const SETUP_TOKEN_TTL_MINUTES = 60;
 
-export function initializeAdminSetup(): void {
+export async function initializeAdminSetup(): Promise<void> {
   try {
-    if (countAdmins() > 0) {
+    if ((await countAdmins()) > 0) {
       setupTokenHash = null;
       setupTokenIssuedAt = null;
       return;

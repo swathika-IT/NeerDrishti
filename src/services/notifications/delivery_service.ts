@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { getDb } from '../../db/sqlite';
+import { getDb } from '../../db/mongo';
 import { normalizeDistrict } from '../district_normalizer';
 import { loadNotificationConfig } from './config';
 import { createDefaultProviders } from './providers';
@@ -166,7 +166,7 @@ export class NotificationDeliveryService {
       (request.channels && request.channels.length > 0 ? request.channels : ALL_CHANNELS)
         .filter((channel): channel is NotificationDeliveryChannel => ALL_CHANNELS.includes(channel))
     ));
-    const subscribers = this.getSubscribers(districtId);
+    const subscribers = await this.getSubscribers(districtId);
     const alertRank = ALERT_RANK[request.alertLevel] ?? 0;
     const results: NotificationCandidateResult[] = [];
     const summary: Record<NotificationDeliveryStatus, number> = {
@@ -203,7 +203,7 @@ export class NotificationDeliveryService {
         const rateKey = `notification:${row.user_id}:${channel}`;
         const rate = this.rateLimiter.check(rateKey, this.config.rateLimitPerHour, 3600 * 1000);
         if (!rate.allowed) {
-          const limited = this.persistResult(request, row, channel, check.destination, {
+           const limited = await this.persistResult(request, row, channel, check.destination, {
             status: 'RATE_LIMITED',
             attempts: 0,
             providerMessageId: null,
@@ -216,7 +216,7 @@ export class NotificationDeliveryService {
 
         const message = this.buildMessage(request, row, channel, check.destination);
         const providerResult = await this.callProvider(this.providers[channel], message);
-        const candidate = this.persistResult(request, row, channel, check.destination, providerResult, districtId);
+        const candidate = await this.persistResult(request, row, channel, check.destination, providerResult, districtId);
         results.push(candidate);
         summary[candidate.status] += 1;
       }
@@ -232,29 +232,38 @@ export class NotificationDeliveryService {
     };
   }
 
-  private getSubscribers(districtId: string): NotificationSubscriberRow[] {
+  private async getSubscribers(districtId: string): Promise<NotificationSubscriberRow[]> {
     const db = getDb();
-    return db.prepare(`
-      SELECT
-        u.id AS user_id,
-        u.email,
-        u.full_name,
-        u.phone,
-        u.phone_verified,
-        u.status,
-        s.id AS subscription_id,
-        s.min_severity,
-        p.email_enabled,
-        p.sms_enabled,
-        p.whatsapp_enabled,
-        p.consent_given_at,
-        p.unsubscribed_all_at
-      FROM alert_subscriptions s
-      JOIN users u ON u.id = s.user_id
-      LEFT JOIN notification_preferences p ON p.user_id = u.id
-      WHERE s.district_id = ? AND u.deleted_at IS NULL
-      ORDER BY u.id ASC, s.id ASC
-    `).all(districtId) as unknown as NotificationSubscriberRow[];
+    const subs = await db.collection('alert_subscriptions').find({ district_id: districtId }).sort({ _id: 1 }).toArray();
+    if (subs.length === 0) return [];
+    const userIds = subs.map((s: any) => s.user_id);
+    const users = await db.collection('users').find({ _id: { $in: userIds }, deleted_at: null }).toArray();
+    const userMap = new Map(users.map((u: any) => [u._id, u]));
+    const prefs = await db.collection('notification_preferences').find({ user_id: { $in: userIds } }).toArray();
+    const prefMap = new Map(prefs.map((p: any) => [p.user_id, p]));
+    const rows: NotificationSubscriberRow[] = [];
+    for (const s of subs) {
+      const u = userMap.get(s.user_id);
+      if (!u) continue;
+      const p = prefMap.get(s.user_id);
+      rows.push({
+        user_id: u._id,
+        email: u.email,
+        full_name: u.full_name,
+        phone: u.phone,
+        phone_verified: u.phone_verified,
+        status: u.status,
+        subscription_id: s._id,
+        min_severity: s.min_severity,
+        email_enabled: p?.email_enabled,
+        sms_enabled: p?.sms_enabled,
+        whatsapp_enabled: p?.whatsapp_enabled,
+        consent_given_at: p?.consent_given_at,
+        unsubscribed_all_at: p?.unsubscribed_all_at,
+      } as any);
+    }
+    rows.sort((a: any, b: any) => (a.user_id - b.user_id) || (a.subscription_id - b.subscription_id));
+    return rows;
   }
 
   private buildMessage(
@@ -360,7 +369,7 @@ export class NotificationDeliveryService {
     };
   }
 
-  private persistResult(
+  private async persistResult(
     request: NotificationRequest,
     row: NotificationSubscriberRow,
     channel: NotificationDeliveryChannel,
@@ -373,7 +382,7 @@ export class NotificationDeliveryService {
       dryRunReason?: string;
     },
     districtId: string
-  ): NotificationCandidateResult {
+  ): Promise<NotificationCandidateResult> {
     const id = `notif_${crypto.randomUUID()}`;
     const timestamp = this.now().toISOString();
     const currentChannel = channelConfig(this.config, channel);
@@ -399,35 +408,28 @@ export class NotificationDeliveryService {
     };
 
     const db = getDb();
-    db.prepare(`
-      INSERT INTO notification_history (
-        id, district_id, district_name, alert_level, channel, title, message,
-        recommended_action, signals_triggered, status, recipient_group, timestamp,
-        is_prototype, metadata, user_id, subscription_id, delivery_status,
-        provider_message_id, retry_count, last_attempt_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    await db.collection('notification_history').insertOne({
       id,
-      districtId,
-      request.districtName,
-      request.alertLevel,
+      district_id: districtId,
+      district_name: request.districtName,
+      alert_level: request.alertLevel,
       channel,
-      subject,
-      body,
-      request.recommendedAction || null,
-      JSON.stringify(request.signalsTriggered || []),
-      result.status,
-      'Alert Subscriber',
+      title: subject,
+      message: body,
+      recommended_action: request.recommendedAction || null,
+      signals_triggered: JSON.stringify(request.signalsTriggered || []),
+      status: result.status,
+      recipient_group: 'Alert Subscriber',
       timestamp,
-      1,
-      JSON.stringify(metadata),
-      row.user_id,
-      row.subscription_id,
-      result.status,
-      providerMessageId,
-      retryCount,
-      result.attempts > 0 ? timestamp : null
-    );
+      is_prototype: 1,
+      metadata: JSON.stringify(metadata),
+      user_id: row.user_id,
+      subscription_id: row.subscription_id,
+      delivery_status: result.status,
+      provider_message_id: providerMessageId,
+      retry_count: retryCount,
+      last_attempt_at: result.attempts > 0 ? timestamp : null,
+    });
 
     return {
       userId: row.user_id,

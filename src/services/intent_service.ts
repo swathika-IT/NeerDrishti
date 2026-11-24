@@ -202,8 +202,59 @@ export class IntentService {
     let intent: UserQuestionIntent = 'GENERAL_PROJECT_INFORMATION';
     let confidence = 0.85;
 
+    const isGreeting = (
+      /^(hi+|hey+|hlo+|hello+|namaste|namaskar|good\s+(morning|afternoon|evening))[\s!.,?]*$/i.test(qLower) ||
+      /^(నమస్తే|నమస్కారం|హలో|హాయ్|శుభోదయం|శుభ సాయంత్రం)[\s!.,?]*$/.test(query) ||
+      /^(नमस्ते|नमस्कार|हैलो|हाय|सुप्रभात|शुभ संध्या)[\s!.,?]*$/.test(query)
+    );
+    const isSmallTalk = (
+      /\b(how are you|how r u|how're you|how is it going|how's it going|what are you doing|whats up|what's up|you good\?)\b/i.test(qLower) ||
+      /ఎలా ఉన్నారు|ఏమి చేస్తున్నారు|ఎటు ఉన్నారు/.test(query) ||
+      /कैसे हो|कैसे हैं|आप क्या कर रहे हैं|क्या हाल है/.test(query)
+    );
+    const isIntroduction = (
+      /\b(who are you|what are you|what is neerdrishti|what's neerdrishti|tell me about neerdrishti|about neerdrishti|introduce yourself|what can you help|what can you do)\b/i.test(qLower) ||
+      /నీర్_?దృష్టి అంటే ఏమిటి|నీర్_?దృష్టి గురించి|మీరు ఎవరు|ఏమి చేయగలరు/.test(query) ||
+      /नीरदृष्टि क्या है|नीरदृष्टि के बारे में|आप कौन हैं|आप क्या कर सकते हैं/.test(query)
+    );
+    const isGratitude = (
+      /\b(thank you|thanks|thank u|thnx|thanx|appreciate it|much appreciated)\b/i.test(qLower) ||
+      /ధన్యవాదాలు|థ్యాంక్స్|థ్యాంక్ యూ/.test(query) ||
+      /धन्यवाद|थैंक यू|थैंक्स/.test(query)
+    );
+    const hasFloodTerms = /\b(rains?|rainfall|floods?|flooding|risk|alerts?|district|water|level|safety|forecast|reports?|nala|river|dangers?|dangerous)\b/i.test(qLower) || /వరద|వర్షం|ముప్పు|అలర్ట్|జిల్లా|నీరు|రక్షణ/.test(query) || /बाढ़|वर्षा|जोखिम|अलर्ट|जिला|पानी|सुरक्षा/.test(query);
+    const isGeneralConversation = !hasFloodTerms && query.length <= 60 && (
+      /^(ok|okay|k|fine|sure|cool|nice|great|good|interesting|i see|tell me more|and then|what else)[\s!.,?]*$/i.test(qLower) ||
+      /^(ఒకే|సరే|బాగుంది|ఇంకా చెప్పండి|ఆసక్తికరం)[\s!.,?]*$/.test(query) ||
+      /^(ठीक है|अच्छा|और बताओ|दिलचस्प है)[\s!.,?]*$/.test(query)
+    );
+
+    if (isGreeting) {
+      intent = 'GREETING';
+      confidence = 0.98;
+    } else if (isSmallTalk) {
+      intent = 'SMALL_TALK';
+      confidence = 0.96;
+    } else if (isIntroduction) {
+      intent = 'INTRODUCTION';
+      confidence = 0.97;
+    } else if (isGratitude) {
+      intent = 'GRATITUDE';
+      confidence = 0.98;
+    } else if (isGeneralConversation) {
+      intent = 'GENERAL_CONVERSATION';
+      confidence = 0.82;
+    } else if (
+      !hasFloodTerms &&
+      detectedDistricts.length === 0 &&
+      /\b(what|why|how|who|when|where|which|can|could|do|does|is|are|should)\b/i.test(qLower) &&
+      query.length >= 12
+    ) {
+      intent = 'GENERAL_KNOWLEDGE';
+      confidence = 0.78;
+    }
     // 1. Comparison Intent
-    if (isComparisonQuery && detectedDistricts.length >= 2) {
+    else if (isComparisonQuery && detectedDistricts.length >= 2) {
       intent = 'DISTRICT_COMPARISON';
       confidence = 0.98;
     }
@@ -227,7 +278,7 @@ export class IntentService {
     }
     // 4. Safety / Precautions Guidance Intent
     else if (
-      /\b(safety|precaution|precautions|what to do|evacuate|shelter|guidelines|protective|protect|avoid|actionable|measures|advisory)\b/i.test(qLower) ||
+      /\b(safety|precaution|precautions|what to do|what should i do|evacuate|shelter|guidelines|protective|protect|avoid|actionable|measures|advisory)\b/i.test(qLower) ||
       query.includes('రక్షణ') || query.includes('జాగ్రత్తలు') || query.includes('సూచనలు') ||
       query.includes('सुरक्षा') || query.includes('सावधानी') || query.includes('सलाह')
     ) {

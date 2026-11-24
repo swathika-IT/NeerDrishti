@@ -2,11 +2,12 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+import { getMongoTestUri, connectMongoTest, dropMongoTestDb, closeMongoTest, assertSafeMongoTestUri } from './helpers/mongo_test_harness';
 
 const PROJECT_ROOT = process.cwd();
-const SOURCE_DB = path.join(PROJECT_ROOT, 'data', 'neerdrishti.db');
-const TEST_DB = path.join(os.tmpdir(), `neerdrishti-hist-test-${Date.now()}.db`);
+const MONGO_URI = getMongoTestUri();
+assertSafeMongoTestUri(MONGO_URI);
+let mongo: any;
 
 import { parseCsv } from '../src/services/historical/csv';
 import { parseHistoricalRainfallCsv, resolveHistoricalDistrict } from '../src/services/historical/historical_import';
@@ -25,15 +26,16 @@ const HEADER = 'State,District,Date,"Daily Actual","Daily Normal",Category';
 const row = (state: string, district: string, date: string, actual: string, normal = '5', cat = 'LD') =>
   `${state},${district},${date},${actual},${normal},${cat}`;
 
-before(() => {
-  fs.copyFileSync(SOURCE_DB, TEST_DB);
-  process.env.DATABASE_PATH = TEST_DB;
+before(async () => {
+  process.env.MONGODB_URI = MONGO_URI;
+  mongo = await connectMongoTest(MONGO_URI);
+  await mongo.db.dropDatabase();
+  const { initDatabase } = await import('../src/db/mongo');
+  await initDatabase();
 });
 
-after(() => {
-  for (const f of [TEST_DB, `${TEST_DB}-wal`, `${TEST_DB}-shm`]) {
-    try { fs.unlinkSync(f); } catch { /* ignore */ }
-  }
+after(async () => {
+  if (mongo) { await dropMongoTestDb(mongo); await closeMongoTest(mongo); }
 });
 
 test('CSV parser handles quotes, embedded commas, embedded newlines, CRLF and BOM', () => {
@@ -110,7 +112,7 @@ test('source attribution and licence metadata are attached to every record', () 
 });
 
 test('DB import is idempotent: re-importing the same rows inserts nothing new', async () => {
-  const { insertHistoricalSignalsBatch, getExistingSignalDateKeys } = await import('../src/db/sqlite');
+  const { insertHistoricalSignalsBatch, getExistingSignalDateKeys } = await import('../src/services/historical/historical_import');
   const csv = [
     HEADER,
     row('TELANGANA', 'KAMAREDDY', '2026-09-10', '3.1'),
@@ -132,21 +134,19 @@ test('DB import is idempotent: re-importing the same rows inserts nothing new', 
     metadata: r.metadata,
   }));
 
-  const inserted1 = insertHistoricalSignalsBatch(rows);
+  const inserted1 = await insertHistoricalSignalsBatch(rows);
   assert.equal(inserted1, 2);
-  const existing = getExistingSignalDateKeys('TEST-HISTORICAL-SOURCE', 'rainfall');
+  const existing = await getExistingSignalDateKeys('TEST-HISTORICAL-SOURCE', 'rainfall');
   const secondPass = rows.filter(r => !existing.has(`${r.district_id}|${r.recorded_at.slice(0, 10)}`));
   assert.equal(secondPass.length, 0, 'second import must skip all rows as duplicates');
 });
 
 test('HISTORICAL rows are stored with HISTORICAL mode and never selected as LIVE', async () => {
-  const { DatabaseSync } = await import('node:sqlite');
-  const db = new DatabaseSync(TEST_DB, { readOnly: true });
-  const stored = db.prepare("select count(*) c from external_signals where source_name = 'TEST-HISTORICAL-SOURCE' and data_mode = 'HISTORICAL'").get() as any;
-  assert.equal(stored.c, 2);
+  const stored = await mongo.db.collection('external_signals').countDocuments({ source_name: 'TEST-HISTORICAL-SOURCE', data_mode: 'HISTORICAL' });
+  assert.equal(stored, 2);
 
   const { rainfallService } = await import('../src/services/rainfall_service');
-  const ctx = rainfallService.selectRainfallForDistrict('kamareddy', 'Kamareddy', 5, 1, 'Heavy Rainfall');
+  const ctx = await rainfallService.selectRainfallForDistrict('kamareddy', 'Kamareddy', 5, 1, 'Heavy Rainfall');
   // The historical test source must never be presented as LIVE evidence. (A verified LIVE source
   // such as Open-Meteo may legitimately be selected; the historical row must not be.)
   assert.ok(
