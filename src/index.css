@@ -1,1 +1,16 @@
 @import "tailwindcss";
+
+.risk-map-popup .leaflet-popup-content-wrapper {
+  box-sizing: border-box;
+  width: var(--risk-map-popup-width, 300px) !important;
+  max-width: 100%;
+}
+
+.risk-map-popup .leaflet-popup-content {
+  box-sizing: border-box;
+  width: calc(100% - 26px) !important;
+  max-width: 100%;
+  margin: 10px 13px !important;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}

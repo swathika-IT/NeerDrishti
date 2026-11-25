@@ -1,0 +1,92 @@
+{
+  "report_type": "processed_boundary_quality",
+  "status": "PASS",
+  "generated_at": "2026-11-25T16:20:39Z",
+  "artifact": "data/processed/geographic/telangana_districts.geojson",
+  "feature_count": 33,
+  "unique_district_count": 33,
+  "geometry": {
+    "expected_types": [
+      "Polygon",
+      "MultiPolygon"
+    ],
+    "actual_types": [
+      "Polygon"
+    ],
+    "all_polygon_or_multipolygon": true,
+    "all_valid_non_empty_positive_area": true,
+    "invalid_district_ids": [],
+    "empty_district_ids": [],
+    "coordinate_bounds_wgs84": [
+      77.23589,
+      15.836075,
+      81.322636,
+      19.916807
+    ],
+    "all_coordinates_in_telangana_extent": true
+  },
+  "district_coverage": {
+    "expected_count": 33,
+    "matched_count": 33,
+    "missing_district_ids": [],
+    "duplicate_district_ids": [],
+    "unexpected_district_ids": [],
+    "all_33_present": true
+  },
+  "district_ids": [
+    "adilabad",
+    "bhadradri_kothagudem",
+    "hanumakonda",
+    "hyderabad",
+    "jagtial",
+    "jangaon",
+    "jayashankar_bhupalpally",
+    "jogulamba_gadwal",
+    "kamareddy",
+    "karimnagar",
+    "khammam",
+    "kumuram_bheem_asifabad",
+    "mahabubabad",
+    "mahabubnagar",
+    "mancherial",
+    "medak",
+    "medchal_malkajgiri",
+    "mulugu",
+    "nagarkurnool",
+    "nalgonda",
+    "narayanpet",
+    "nirmal",
+    "nizamabad",
+    "peddapalli",
+    "rajanna_sircilla",
+    "ranga_reddy",
+    "sangareddy",
+    "siddipet",
+    "suryapet",
+    "vikarabad",
+    "wanaparthy",
+    "warangal",
+    "yadadri_bhuvanagiri"
+  ],
+  "source": {
+    "dataset": "District Boundary - District NWIC",
+    "dataset_url": "https://nwdp.nwic.gov.in/dataset/district-boundary",
+    "resource_url": "https://nwdp.nwic.gov.in/dataset/district-boundary/resource/8d9aa2e9-9806-4f26-a4ac-48ba21e9b96d",
+    "download_url": "https://nwdp.nwic.gov.in/dataset/6c1af675-1dec-4927-882c-c1ba9d73f76b/resource/8d9aa2e9-9806-4f26-a4ac-48ba21e9b96d/download/district_nwic_geojson.zip",
+    "data_producer": "Geological Survey of India (GSI)",
+    "portal": "National Water Data Portal, National Water Informatics Centre, Ministry of Jal Shakti",
+    "license_id": "other-open",
+    "license_title": "Other (Open)",
+    "last_updated": "2025-05-05T07:23:41.336587",
+    "archive_entry_modified": "2025-01-13T16:23:36.0000000+05:30",
+    "archive_bytes": 71238839,
+    "archive_sha256": "44C734CC72139F2447DCEBFE2791CAC862DC5BA265E158912D797CF3410D5C37",
+    "source_crs": "EPSG:7755",
+    "target_crs": "EPSG:4326",
+    "source_feature_count": 733,
+    "processing": "Telangana features filtered from the 733-feature NWIC source; names normalized to canonical district_id; reprojected EPSG:7755 to EPSG:4326; geometries simplified by 0.0005 degrees with preserve_topology.",
+    "simplify_deg": 0.0005,
+    "processed_at": "2026-11-25T13:07:30Z"
+  },
+  "validation_report": "data/processed/geographic/telangana_districts.validation.json"
+}

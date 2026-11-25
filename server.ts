@@ -58,7 +58,8 @@ import { NotificationDeliveryService } from './src/services/notifications/delive
 import { getNotificationDeliveryConfig } from './src/services/notifications/config';
 import type { NotificationAlertLevel, NotificationDeliveryChannel } from './src/services/notifications/types';
 import { imdCapService } from './src/services/cap/imd_cap_service';
-import { DistrictStatus } from './src/types';
+import type { DataSourceMode, DistrictStatus } from './src/types';
+import type { SignalDataMode } from './src/types/signals';
 import { generate24HourRainfallTrend } from './src/utils/rainfall_history';
 import {
   getLlamaConfig,
@@ -298,6 +299,23 @@ function calculateRainfallScore(rainfall24h: number, rainfall3h: number = 0): nu
   return Math.max(0, Math.min(100, Math.round(baseScore * 10) / 10));
 }
 
+function normalizeRainfallDataMode(dataMode: SignalDataMode, sourceName: string): SignalDataMode {
+  const normalizedSource = String(sourceName || '').toLowerCase();
+  if ((normalizedSource.includes('open-meteo') || normalizedSource.includes('open meteo')) && (dataMode === 'LIVE' || dataMode === 'SIMULATED')) {
+    return 'FORECAST';
+  }
+  return dataMode;
+}
+
+function describeRainfallDataMode(dataMode: SignalDataMode): DataSourceMode {
+  if (dataMode === 'LIVE') return 'Live Data';
+  if (dataMode === 'FORECAST') return 'Model Forecast';
+  if (dataMode === 'HISTORICAL') return 'Historical Data';
+  if (dataMode === 'SIMULATED') return 'Simulated Data';
+  if (dataMode === 'UNAVAILABLE') return 'Unavailable';
+  return 'Reference Data';
+}
+
 // Composite Status Computation for Any District (combining hydro data + SQLite citizen report aggregation)
 async function computeDistrictStatus(
   meta: DistrictMetadataFile,
@@ -334,6 +352,8 @@ async function computeDistrictStatus(
     rainfallSource = `${iotRain.device_name} (Virtual IoT Node: ${iotRain.device_id})`;
     rainfallDataMode = 'SIMULATED';
   }
+
+  rainfallDataMode = normalizeRainfallDataMode(rainfallDataMode, rainfallSource);
 
   const rainfallScore = calculateRainfallScore(rainfall24h, rainfall3h);
 
@@ -385,9 +405,13 @@ async function computeDistrictStatus(
     terrain_type: meta.terrain_context || 'Deccan Plateau Terrain',
     river_basin: meta.river_basin_context || 'Godavari / Krishna Sub-Basin',
     monitoring_category: meta.monitoring_category,
-    data_source_mode: rainCtx.dataMode === 'LIVE' ? 'Live Data' : meta.data_source_mode,
-    data_confidence: rainCtx.dataMode === 'LIVE' ? (rainCtx.confidence >= 0.8 ? 'High' : 'Medium') : meta.data_confidence,
-    data_provenance: rainCtx.dataMode === 'LIVE' ? `${rainCtx.sourceName} (Observation: ${rainCtx.recordedAt})` : meta.data_provenance,
+    data_source_mode: describeRainfallDataMode(rainfallDataMode),
+    data_confidence: rainfallDataMode === 'LIVE' ? (rainCtx.confidence >= 0.8 ? 'High' : 'Medium') : meta.data_confidence,
+    data_provenance: rainfallDataMode === 'LIVE'
+      ? `${rainCtx.sourceName} (Observation: ${rainCtx.recordedAt})`
+      : rainfallDataMode === 'FORECAST'
+        ? `${rainCtx.sourceName} (NWP model forecast: ${rainCtx.recordedAt}; not station telemetry)`
+        : meta.data_provenance,
     data_limitation_notes: meta.data_limitation_notes,
     category_basis: meta.category_basis,
     region_zone: meta.region_zone,

@@ -6,7 +6,7 @@ services:
     runtime: node
     plan: free
     region: singapore
-    branch: sqlite-to-mongo-staging
+    branch: feature/mongodb-data-engineering
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start            # verifies MongoDB, then starts the server
     healthCheckPath: /api/health/ready

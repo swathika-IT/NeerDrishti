@@ -1,0 +1,306 @@
+{
+  "valid": true,
+  "checks": {
+    "exactly_33_features": true,
+    "exactly_33_canonical_matches": true,
+    "all_33_canonical_ids_matched": true,
+    "mulugu_present": true,
+    "narayanpet_present": true,
+    "no_duplicate_districts": true,
+    "no_missing_districts": true,
+    "polygon_or_multipolygon_only": true,
+    "wgs84_coordinates_valid": true,
+    "telangana_extent_valid": true,
+    "no_invalid_or_empty_geometries": true,
+    "source_date_documented": true,
+    "license_documented": true
+  },
+  "errors": [],
+  "source": {
+    "dataset": "District Boundary - District NWIC",
+    "dataset_url": "https://nwdp.nwic.gov.in/dataset/district-boundary",
+    "resource_url": "https://nwdp.nwic.gov.in/dataset/district-boundary/resource/8d9aa2e9-9806-4f26-a4ac-48ba21e9b96d",
+    "download_url": "https://nwdp.nwic.gov.in/dataset/6c1af675-1dec-4927-882c-c1ba9d73f76b/resource/8d9aa2e9-9806-4f26-a4ac-48ba21e9b96d/download/district_nwic_geojson.zip",
+    "data_producer": "Geological Survey of India (GSI)",
+    "portal": "National Water Data Portal, National Water Informatics Centre, Ministry of Jal Shakti",
+    "license_id": "other-open",
+    "license_title": "Other (Open)",
+    "last_updated": "2025-05-05T07:23:41.336587",
+    "archive_entry_modified": "2025-01-13T16:23:36.0000000+05:30",
+    "archive_bytes": 71238839,
+    "archive_sha256": "44C734CC72139F2447DCEBFE2791CAC862DC5BA265E158912D797CF3410D5C37",
+    "source_crs": "EPSG:7755",
+    "target_crs": "EPSG:4326"
+  },
+  "source_feature_count": 733,
+  "telangana_feature_count": 33,
+  "canonical_district_count": 33,
+  "matches": [
+    {
+      "district_id": "adilabad",
+      "canonical_name": "Adilabad",
+      "source_name": "Adilabad",
+      "source_objectid": 587,
+      "source_dtcode": "501",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "bhadradri_kothagudem",
+      "canonical_name": "Bhadradri Kothagudem",
+      "source_name": "Bhadradri Kothagudem",
+      "source_objectid": 607,
+      "source_dtcode": "690",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "hanumakonda",
+      "canonical_name": "Hanumakonda",
+      "source_name": "Hanumakonda",
+      "source_objectid": 603,
+      "source_dtcode": "686",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "hyderabad",
+      "canonical_name": "Hyderabad",
+      "source_name": "Hyderabad",
+      "source_objectid": 588,
+      "source_dtcode": "507",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "jagtial",
+      "canonical_name": "Jagtial",
+      "source_name": "Jagitial",
+      "source_objectid": 598,
+      "source_dtcode": "681",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "jangaon",
+      "canonical_name": "Jangaon",
+      "source_name": "Jangoan",
+      "source_objectid": 606,
+      "source_dtcode": "689",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "jayashankar_bhupalpally",
+      "canonical_name": "Jayashankar Bhupalpally",
+      "source_name": "Jayashankar Bhupalapally",
+      "source_objectid": 604,
+      "source_dtcode": "687",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "jogulamba_gadwal",
+      "canonical_name": "Jogulamba Gadwal",
+      "source_name": "Jogulamba Gadwal",
+      "source_objectid": 612,
+      "source_dtcode": "695",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "kamareddy",
+      "canonical_name": "Kamareddy",
+      "source_name": "Kamareddy",
+      "source_objectid": 602,
+      "source_dtcode": "685",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "karimnagar",
+      "canonical_name": "Karimnagar",
+      "source_name": "Karimnagar",
+      "source_objectid": 589,
+      "source_dtcode": "508",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "khammam",
+      "canonical_name": "Khammam",
+      "source_name": "Khammam",
+      "source_objectid": 590,
+      "source_dtcode": "509",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "kumuram_bheem_asifabad",
+      "canonical_name": "Kumuram Bheem Asifabad",
+      "source_name": "Kumuram Bheem Asifabad",
+      "source_objectid": 616,
+      "source_dtcode": "699",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "mahabubabad",
+      "canonical_name": "Mahabubabad",
+      "source_name": "Mahabubabad",
+      "source_objectid": 605,
+      "source_dtcode": "688",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "mahabubnagar",
+      "canonical_name": "Mahabubnagar",
+      "source_name": "Mahabubnagar",
+      "source_objectid": 591,
+      "source_dtcode": "512",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "mancherial",
+      "canonical_name": "Mancherial",
+      "source_name": "Mancherial",
+      "source_objectid": 601,
+      "source_dtcode": "684",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "medak",
+      "canonical_name": "Medak",
+      "source_name": "Medak",
+      "source_objectid": 592,
+      "source_dtcode": "513",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "medchal_malkajgiri",
+      "canonical_name": "Medchal-Malkajgiri",
+      "source_name": "Medchal Malkajgiri",
+      "source_objectid": 617,
+      "source_dtcode": "700",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "mulugu",
+      "canonical_name": "Mulugu",
+      "source_name": "Mulugu",
+      "source_objectid": 618,
+      "source_dtcode": "720",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "nagarkurnool",
+      "canonical_name": "Nagarkurnool",
+      "source_name": "Nagarkurnool",
+      "source_objectid": 611,
+      "source_dtcode": "694",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "nalgonda",
+      "canonical_name": "Nalgonda",
+      "source_name": "Nalgonda",
+      "source_objectid": 593,
+      "source_dtcode": "514",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "narayanpet",
+      "canonical_name": "Narayanpet",
+      "source_name": "Narayanpet",
+      "source_objectid": 619,
+      "source_dtcode": "721",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "nirmal",
+      "canonical_name": "Nirmal",
+      "source_name": "Nirmal",
+      "source_objectid": 597,
+      "source_dtcode": "680",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "nizamabad",
+      "canonical_name": "Nizamabad",
+      "source_name": "Nizamabad",
+      "source_objectid": 594,
+      "source_dtcode": "516",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "peddapalli",
+      "canonical_name": "Peddapalli",
+      "source_name": "Peddapalli",
+      "source_objectid": 599,
+      "source_dtcode": "682",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "rajanna_sircilla",
+      "canonical_name": "Rajanna Sircilla",
+      "source_name": "Rajanna Sircilla",
+      "source_objectid": 600,
+      "source_dtcode": "683",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "ranga_reddy",
+      "canonical_name": "Ranga Reddy",
+      "source_name": "Ranga Reddy",
+      "source_objectid": 595,
+      "source_dtcode": "518",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "sangareddy",
+      "canonical_name": "Sangareddy",
+      "source_name": "Sangareddy",
+      "source_objectid": 608,
+      "source_dtcode": "691",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "siddipet",
+      "canonical_name": "Siddipet",
+      "source_name": "Siddipet",
+      "source_objectid": 609,
+      "source_dtcode": "692",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "suryapet",
+      "canonical_name": "Suryapet",
+      "source_name": "Suryapet",
+      "source_objectid": 613,
+      "source_dtcode": "696",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "vikarabad",
+      "canonical_name": "Vikarabad",
+      "source_name": "Vikarabad",
+      "source_objectid": 615,
+      "source_dtcode": "698",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "wanaparthy",
+      "canonical_name": "Wanaparthy",
+      "source_name": "Wanaparthy",
+      "source_objectid": 610,
+      "source_dtcode": "693",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "warangal",
+      "canonical_name": "Warangal",
+      "source_name": "Warangal",
+      "source_objectid": 596,
+      "source_dtcode": "522",
+      "geometry_type": "MultiPolygon"
+    },
+    {
+      "district_id": "yadadri_bhuvanagiri",
+      "canonical_name": "Yadadri Bhuvanagiri",
+      "source_name": "Yadadri Bhuvanagiri",
+      "source_objectid": 614,
+      "source_dtcode": "697",
+      "geometry_type": "MultiPolygon"
+    }
+  ],
+  "missing_district_ids": [],
+  "duplicate_district_ids": []
+}

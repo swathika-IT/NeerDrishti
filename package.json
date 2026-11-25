@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test tests/regression_risk_forecast.test.ts tests/ai_conversation.test.ts",
+    "test": "tsx --test tests/regression_risk_forecast.test.ts tests/ai_conversation.test.ts tests/risk_map_geojson.test.ts",
     "test:ai": "tsx --test tests/citizen_brief.test.ts tests/district_features.test.ts tests/api_json_contract.test.ts tests/notification_preview.test.ts tests/ai_conversation.test.ts",
     "test:auth": "tsx --test tests/auth_security.test.ts",
     "test:reports": "tsx --test tests/report_security.test.ts",
@@ -52,6 +52,7 @@
     "nodemailer": "^10.3.1",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "react-leaflet": "^5.0.0",
     "recharts": "^3.10.1",
     "vite": "^6.2.3"
   },

@@ -106,6 +106,9 @@ export class AlertEngine {
 
     // Data Confidence & Provenance
     const dataMode = district.data_source_mode || (district.is_simulated ? 'Simulated Data' : 'Live Data');
+    const modeText = dataMode.toLowerCase();
+    const isPrototypeMode = district.is_simulated || modeText.includes('simulat') || modeText.includes('prototype');
+    const isModelForecastMode = modeText.includes('model') || modeText.includes('forecast') || modeText.includes('reference');
     const dataConfidence = district.data_confidence || district.risk_confidence || 'Medium';
     const forecastConfidence = timeline?.dataConfidence || 'MEDIUM';
     const confidenceScore = district.risk_data_completeness ? district.risk_data_completeness / 100 : 0.8;
@@ -114,14 +117,17 @@ export class AlertEngine {
     if (district.data_limitation_notes) {
       limitations.push(district.data_limitation_notes);
     }
-    if (district.is_simulated || dataMode.toLowerCase().includes('simulat') || dataMode.toLowerCase().includes('prototype')) {
+    if (isPrototypeMode) {
       limitations.push('Decision support generated from prototype simulation parameters.');
+    }
+    if (isModelForecastMode) {
+      limitations.push('Weather-model forecast and static reference factors are not official gauge telemetry.');
     }
     if (district.monitoring_category === 'Limited Data') {
       limitations.push('Limited local AWS telemetry coverage; reliance on interpolated regional grid.');
     }
     if (limitations.length === 0) {
-      limitations.push('Model outputs reflect automated multi-sensor convergence.');
+      limitations.push('Model outputs reflect configured telemetry and reference factors.');
     }
 
     // ========================================================
@@ -336,15 +342,16 @@ export class AlertEngine {
     }
 
     // Headline
+    const decisionSupportSuffix = isPrototypeMode || isModelForecastMode ? ' (PROTOTYPE DECISION SUPPORT)' : '';
     const headline = alertLevel === 'CRITICAL'
-      ? `CRITICAL FLOOD RISK ALERT — ${districtName.toUpperCase()} (${peakHorizon} Peak: ${peakRisk}/100)`
+      ? `CRITICAL FLOOD RISK ALERT — ${districtName.toUpperCase()} (${peakHorizon} Peak: ${peakRisk}/100)${decisionSupportSuffix}`
       : alertLevel === 'HIGH'
-      ? `HIGH FLOOD RISK PROJECTION — ${districtName.toUpperCase()} (${peakHorizon} Outlook: ${peakRisk}/100)`
+      ? `HIGH FLOOD RISK PROJECTION — ${districtName.toUpperCase()} (${peakHorizon} Outlook: ${peakRisk}/100)${decisionSupportSuffix}`
       : alertLevel === 'ELEVATED'
-      ? `ELEVATED FLOOD MONITORING — ${districtName.toUpperCase()} (${trend} Trajectory)`
+      ? `ELEVATED FLOOD MONITORING — ${districtName.toUpperCase()} (${trend} Trajectory)${decisionSupportSuffix}`
       : alertLevel === 'WATCH'
-      ? `FLOOD RISK WATCH — ${districtName.toUpperCase()} (Monitoring Baseline)`
-      : `NORMAL HYDRO-METEOROLOGICAL CONDITIONS — ${districtName.toUpperCase()}`;
+      ? `FLOOD RISK WATCH — ${districtName.toUpperCase()} (Monitoring Baseline)${decisionSupportSuffix}`
+      : `NORMAL HYDRO-METEOROLOGICAL CONDITIONS — ${districtName.toUpperCase()}${decisionSupportSuffix}`;
 
     // Timeline Escalation Points
     const timelineEscalation = horizonList.map(h => ({
@@ -451,16 +458,24 @@ export class AlertEngine {
     let tePrecautions: string[] = [];
     let hiPrecautions: string[] = [];
 
-    const isSimulated = dataMode.toLowerCase().includes('simulat') || dataMode.toLowerCase().includes('prototype');
+    const modeValue = dataMode.toLowerCase();
+    const isSimulated = modeValue.includes('simulat') || modeValue.includes('prototype');
+    const isModelForecast = modeValue.includes('model') || modeValue.includes('forecast') || modeValue.includes('reference');
     const simNoticeEn = isSimulated
-      ? `PROTOTYPE DECISION SUPPORT: This advisory is based on mathematical risk modeling and ${dataMode.toLowerCase()} for scenario evaluation.`
-      : `TELEMETRY NOTICE: Synthesized from multi-sensor automatic weather and river gauging feeds.`;
+      ? `PROTOTYPE DECISION SUPPORT: This advisory is based on mathematical risk modeling and ${modeValue} for scenario evaluation.`
+      : isModelForecast
+        ? 'MODEL FORECAST NOTICE: Synthesized from numerical weather-model output and static reference factors; not official gauge telemetry.'
+        : 'TELEMETRY NOTICE: Synthesized from configured verified telemetry and reference factors.';
     const simNoticeTe = isSimulated
       ? `ప్రోటోటైప్ నిర్ణయ మద్దతు: ఈ సలహా గణిత ప్రమాద నమూనా మరియు సిమ్యులేషన్ డేటా ఆధారంగా రూపొందించబడింది.`
-      : `టెలిమెట్రీ నోటీసు: ఆటోమేటిక్ వాతావరణ మరియు నదీ గేజింగ్ డేటా నుండి విశ్లేషించబడింది.`;
+      : isModelForecast
+        ? `మోడల్ ఫోర్ కాస్ట్ నోటీసు: ఈ సలహా సంఖ్యాత్మక వాతావరణ నమూనా అవుట్ పుట్ మరియు స్థిర సూచన కారకాల నుండి రూపొందించబడింది; ఇది అధికారిక గేజ్ టెలిమెట్రీ కాదు.`
+        : `టెలిమెట్రీ నోటీసు: కాన్ఫిగర్ చేసిన ధృవీకరించిన టెలిమెట్రీ మరియు సూచన కారకాల నుండి విశ్లేషించబడింది.`;
     const simNoticeHi = isSimulated
       ? `प्रोटोटाइप निर्णय सहायता: यह परामर्श गणितीय जोखिम मॉडलिंग और सिमुलेशन डेटा पर आधारित है।`
-      : `टेलीमेट्री सूचना: स्वचालित मौसम और नदी गेजिंग डेटा से संश्लेषित।`;
+      : isModelForecast
+        ? `मॉडल पूर्वानुमान सूचना: यह परामर्श संख्यात्मक मौसम मॉडल आउटपुट और स्थिर संदर्भ कारकों से संश्लेषित है; यह आधिकारिक गेज टेलीमेट्री नहीं है।`
+        : `टेलीमेट्री सूचना: कॉन्फ़िगर किए गए सत्यापित टेलीमेट्री और संदर्भ कारकों से संश्लेषित।`;
 
     if (alertLevel === 'CRITICAL') {
       enTitle = `CRITICAL FLOOD RISK ALERT — ${districtName.toUpperCase()}`;

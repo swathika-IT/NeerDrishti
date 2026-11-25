@@ -1,10 +1,12 @@
 """Geospatial tests on SYNTHETIC geometry/DEM (analytical ground truth), not real Telangana data."""
 import json, math
+from pathlib import Path
 import numpy as np, pytest, rasterio, geopandas as gpd
 from rasterio.transform import from_origin
 from shapely.geometry import box, Polygon
 from scripts.pipeline import boundaries as B, terrain as T
-from scripts.pipeline.districts import catalog
+from scripts.pipeline.common import ROOT
+from scripts.pipeline.districts import all_ids, catalog
 
 def make_geojson(path, names, state="TELANGANA", extra=True, crs="EPSG:4326", bow_tie=False):
     geoms, rows = [], []
@@ -21,7 +23,7 @@ def test_boundaries_inspects_schema_filters_state_normalises_and_repairs(tmp_pat
     names = ["Medchal–Malkajgiri" if n == "Medchal-Malkajgiri" else n for n in names]   # en-dash variant
     names = [n.upper() for n in names]
     src = make_geojson(tmp_path / "in.geojson", names, bow_tie=True)
-    rep = B.process(src, tmp_path / "out.geojson")
+    rep = B.process(src, tmp_path / "out.geojson", quality_report_path=tmp_path / "boundaries.json")
     assert rep["state_column"] == "STATE" and rep["district_column"] == "DISTRICT"
     assert rep["all_33_present"] and rep["n_districts_matched"] == 33 and rep["missing_district_ids"] == []
     assert rep["invalid_geometries_repaired"] >= 1
@@ -30,7 +32,7 @@ def test_boundaries_inspects_schema_filters_state_normalises_and_repairs(tmp_pat
 
 def test_boundaries_reports_missing_and_unmatched(tmp_path):
     names = [d["district_name"] for d in list(catalog().values())[:31]] + ["Nowhereville"]
-    rep = B.process(make_geojson(tmp_path / "a.geojson", names, extra=False), tmp_path / "o.geojson")
+    rep = B.process(make_geojson(tmp_path / "a.geojson", names, extra=False), tmp_path / "o.geojson", quality_report_path=tmp_path / "boundaries.json")
     assert rep["unmatched_names"] == ["Nowhereville"] and not rep["all_33_present"] and len(rep["missing_district_ids"]) == 2
 
 def test_boundaries_refuses_missing_crs(tmp_path):
@@ -39,6 +41,21 @@ def test_boundaries_refuses_missing_crs(tmp_path):
     # GeoJSON without a CRS member defaults to WGS84 in GDAL, so emulate a CRS-less source through a shapefile-like gdf
     gdf = gpd.read_file(p); gdf = gdf.set_crs(None, allow_override=True)
     assert gdf.crs is None   # guard documented: process() raises when crs is None
+
+def test_processed_boundary_dataset_has_33_canonical_districts_and_provenance():
+    path = ROOT / "data" / "processed" / "geographic" / "telangana_districts.geojson"
+    gdf = gpd.read_file(path)
+    assert len(gdf) == 33
+    assert set(gdf["district_id"]) == set(all_ids())
+    assert set(gdf["source_district_name"]) >= {"Mulugu", "Narayanpet"}
+    assert set(gdf["geometry_basis"]) == {"SUPPLIED_BOUNDARY"}
+    assert set(gdf["source_crs"]) == {"EPSG:7755"}
+    assert set(gdf["target_crs"]) == {"EPSG:4326"}
+    assert set(gdf["source_license"]) == {"Other (Open)"}
+    assert all(str(v).startswith("https://nwdp.nwic.gov.in/") for v in gdf["source_url"])
+    assert all(gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"]))
+    assert not gdf.geometry.is_empty.any()
+    assert gdf.geometry.is_valid.all()
 
 def test_slope_of_tilted_plane_matches_analytic_value():
     cell, deg = 30.0, 10.0

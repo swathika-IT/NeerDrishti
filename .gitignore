@@ -56,7 +56,13 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
-data/quality_/reports/*.json
+!data/processed/geographic/
+data/processed/geographic/*
+!data/processed/geographic/telangana_districts.geojson
+!data/processed/geographic/telangana_districts.metadata.json
+!data/processed/geographic/telangana_districts.validation.json
+data/quality_reports/*.json
+!data/quality_reports/boundaries.json
 .cache/
 *.tif
 *.part

@@ -44,7 +44,9 @@ export async function getRegistry() {
 
   const out = [];
   for (const d of datasets) {
-    const run = await db.collection('ingestion_runs').find({ dataset_id: d.dataset_id }).sort({ run_id: -1 }).limit(1).next();
+    const run =
+      (await db.collection('ingestion_runs').find({ dataset_id: d.dataset_id, run_id: { $exists: true } }).sort({ run_id: -1 }).limit(1).next()) ??
+      (await db.collection('ingestion_runs').find({ dataset_id: d.dataset_id }).sort({ started_at: -1 }).limit(1).next());
     const cfg = countMap[d.dataset_id];
     let latest: string | null = null;
     let storedRecords = 0;

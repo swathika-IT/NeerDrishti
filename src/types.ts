@@ -43,10 +43,13 @@ export type MonitoringCategory =
 
 export type DataSourceMode =
   | 'Live Data'
+  | 'Model Forecast'
   | 'Historical Data'
   | 'Simulated Data'
   | 'Prototype Baseline'
-  | 'Limited Data';
+  | 'Limited Data'
+  | 'Reference Data'
+  | 'Unavailable';
 
 export type DataConfidence =
   | 'High'
@@ -139,6 +142,8 @@ export interface DistrictStatus {
   primary_nala_network?: string;
   encroachment_level?: string;
 }
+
+export type DistrictSummary = DistrictStatus;
 
 export type IncidentType =
   | 'Urban Flooding'

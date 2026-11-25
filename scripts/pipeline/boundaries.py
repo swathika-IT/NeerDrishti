@@ -11,7 +11,7 @@ from .common import ROOT, write_quality_report, utc_now
 from .districts import normalize_district, all_ids
 
 NAME_HINTS = ("district", "dtname", "dist_name", "distname", "name")
-STATE_HINTS = ("state", "st_nm", "stname", "st_name")
+STATE_HINTS = ("state_name", "st_nm", "stname", "st_name", "state")
 
 def _find_col(cols, hints, exclude=()):
     low = {c.lower(): c for c in cols}
@@ -21,13 +21,17 @@ def _find_col(cols, hints, exclude=()):
                 return c
     return None
 
-def process(src: str | Path, out: str | Path | None = None, simplify_deg: float = 0.0005) -> dict:
+def process(src: str | Path, out: str | Path | None = None, simplify_deg: float = 0.0005,
+            source_metadata: dict | None = None, quality_report_path: str | Path | None = None) -> dict:
     src = Path(src)
     g = gpd.read_file(src)
+    metadata = source_metadata or {}
     rep = {"source": str(src), "n_features_in": len(g), "columns": [c for c in g.columns if c != "geometry"],
-           "crs_in": str(g.crs), "generated_at": utc_now()}
+           "crs_in": str(g.crs), "crs_out": "EPSG:4326", "source_metadata": metadata,
+           "generated_at": utc_now()}
     if g.crs is None:
         raise RuntimeError("Source has no CRS; refusing to guess. Set it explicitly after verifying with the provider.")
+    source_crs = str(g.crs)
     g = g.to_crs(4326)
     scol = _find_col(g.columns, STATE_HINTS)
     if scol:
@@ -47,6 +51,14 @@ def process(src: str | Path, out: str | Path | None = None, simplify_deg: float 
     g["district_id"] = g[dcol].map(normalize_district)
     rep["unmatched_names"] = sorted(set(map(str, g.loc[g.district_id.isna(), dcol])))
     g = g[g.district_id.notna()]
+    source_details = {}
+    for _, row in g.iterrows():
+        did = row["district_id"]
+        source_details.setdefault(str(did), {
+            "source_district_name": str(row[dcol]),
+            "source_objectid": str(row["objectid"]) if "objectid" in g.columns else "",
+            "source_dtcode": str(row["dtcode"]) if "dtcode" in g.columns else "",
+        })
     invalid = ~g.geometry.is_valid
     rep["invalid_geometries_repaired"] = int(invalid.sum())
     g.loc[invalid, "geometry"] = g.loc[invalid, "geometry"].make_valid()
@@ -57,12 +69,55 @@ def process(src: str | Path, out: str | Path | None = None, simplify_deg: float 
     missing = sorted(set(all_ids()) - set(g.district_id))
     rep.update(n_districts_matched=int(g.district_id.nunique()), missing_district_ids=missing,
                all_33_present=(len(missing) == 0 and g.district_id.nunique() == 33))
+    if g.empty:
+        raise RuntimeError("No districts matched; refusing to write an empty boundary file")
     from .districts import catalog
     g["district_name"] = g.district_id.map(lambda i: catalog()[i]["district_name"])
+    for key in ("source_district_name", "source_objectid", "source_dtcode"):
+        g[key] = g.district_id.map(lambda did, k=key: source_details.get(str(did), {}).get(k, ""))
+    g["source_dataset"] = str(metadata.get("dataset", ""))
+    g["source_publisher"] = str(metadata.get("data_producer", ""))
+    g["source_license"] = str(metadata.get("license_title", ""))
+    g["source_license_id"] = str(metadata.get("license_id", ""))
+    g["source_updated"] = str(metadata.get("last_updated", ""))
+    g["source_url"] = str(metadata.get("dataset_url", ""))
+    g["source_crs"] = source_crs
+    g["target_crs"] = "EPSG:4326"
+    g["geometry_basis"] = "SUPPLIED_BOUNDARY"
+    g["processing"] = str(metadata.get(
+        "processing",
+        f"filtered Telangana; normalized to canonical district_id; reprojected {source_crs} to EPSG:4326; "
+        f"simplified {simplify_deg} degrees with preserve_topology",
+    ))
     g["geometry"] = g.geometry.simplify(simplify_deg, preserve_topology=True)
     out = Path(out or ROOT / "data" / "processed" / "geographic" / "telangana_districts.geojson")
     out.parent.mkdir(parents=True, exist_ok=True)
-    g[["district_id", "district_name", "geometry"]].to_file(out, driver="GeoJSON")
-    rep.update(output=str(out), output_kb=round(out.stat().st_size / 1024, 1))
-    write_quality_report("boundaries", rep)
+    columns = [
+        "district_id", "district_name", "geometry", "source_district_name", "source_objectid",
+        "source_dtcode", "source_dataset", "source_publisher", "source_license", "source_license_id",
+        "source_updated", "source_url", "source_crs", "target_crs", "geometry_basis", "processing",
+    ]
+    g[columns].to_file(out, driver="GeoJSON")
+    metadata_out = out.with_name(f"{out.stem}.metadata.json")
+    def relative_path(p: Path) -> str:
+        try:
+            return str(p.relative_to(ROOT)).replace("\\", "/")
+        except ValueError:
+            return str(p)
+    metadata_out.write_text(json.dumps({
+        **metadata,
+        "source_crs": source_crs,
+        "target_crs": "EPSG:4326",
+        "simplify_deg": simplify_deg,
+        "processed_at": utc_now(),
+        "output": relative_path(out),
+        "quality_report_fields": rep,
+    }, indent=2, default=str), encoding="utf-8")
+    rep.update(output=relative_path(out), output_kb=round(out.stat().st_size / 1024, 1), metadata_output=relative_path(metadata_out))
+    if quality_report_path is None:
+        write_quality_report("boundaries", rep)
+    else:
+        report_out = Path(quality_report_path)
+        report_out.parent.mkdir(parents=True, exist_ok=True)
+        report_out.write_text(json.dumps(rep, indent=2, default=str), encoding="utf-8")
     return rep
